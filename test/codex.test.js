@@ -80,6 +80,32 @@ test('an unwrapped banner is not joined to the lines below it', () => {
   assert.equal(detectLimit(pane, 12, codex.patterns).resetLine, VARIANTS[0]);
 });
 
+test('the out-of-credits picker does not hide the limit from the 12-line scan', () => {
+  // Captured on a Plus plan (#36): the banner is 16 rows up, past the scan.
+  const pane = [
+    '■ You\'ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more',
+    'credits or try again at 11:15 PM.',
+    '',
+    '  You\'re out of Codex messages',
+    '  Your rate limit resets on 11:15 PM. To continue using Codex, add credits or upgrade to Pro today.',
+    '',
+    '› 1. Upgrade',
+    '  2. Add Credits',
+    '',
+    '  Press a number to choose',
+    '                                                                    Tip: ...',
+    '',
+    '› Ask Codex to do anything',
+    '',
+    '  gpt-5.5 · ~/project · thread',
+    '  ← for agents · ? for shortcuts                                        ⚠ 5 warnings · f2 to view',
+  ].join('\n');
+  const d = detectLimit(pane, 12, codex.patterns);
+  assert.equal(d.hit, true);
+  const p = parseResetTime(d.resetLine);
+  assert.deepEqual([p?.hour, p?.minute], [23, 15]);
+});
+
 test('workspace credit variants detected', () => {
   const d = detectLimit('■ Your workspace is out of credits. Add credits to continue.\n› \n', 12, codex.patterns);
   assert.equal(d.hit, true);

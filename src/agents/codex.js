@@ -78,6 +78,9 @@ const LIMIT_ANCHORS = [
   /You['’]ve hit your usage limit/i,   // the desktop app also emits a curly apostrophe
   /Your workspace is out of credits/i,
   /hit your spend cap/i,
+  // Plus plan: an out-of-credits picker sits under the banner and can push it
+  // past the 12-line scan (#36). This line stays inside it and carries the time.
+  /Your rate limit resets on/i,
 ];
 
 export const patterns = {
