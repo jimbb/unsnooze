@@ -1,5 +1,5 @@
 // The docs used to be one page with fourteen in-page anchors, which meant
-// fourteen distinct search intents competed for a single URL. They are now five
+// fourteen distinct search intents competed for a single URL. They are now six
 // routes grouped by what people actually search for. Labels are deliberately
 // query-shaped rather than terse, since sidebar anchor text is one of the few
 // direct topical signals left.
@@ -9,6 +9,15 @@ export const DOC_PAGES = [
     path: '/docs/',
     label: 'Install & setup',
     sections: [['install', 'Getting started'], ['terminals', 'Supported terminals'], ['everyday', 'Day to day']],
+  },
+  {
+    path: '/docs/agents/',
+    label: 'Supported agents',
+    sections: [
+      ['agents', 'Agents'],
+      ['gateways', 'OpenRouter & proxies'],
+      ['design', 'Claude Design'],
+    ],
   },
   {
     path: '/docs/commands/',
@@ -42,6 +51,7 @@ export const DOC_PAGES = [
     label: 'Troubleshooting & security',
     sections: [
       ['troubleshooting', 'Troubleshooting'],
+      ['faq', 'Common questions'],
       ['security', 'Security model'],
       ['development', 'Development'],
     ],
@@ -75,7 +85,7 @@ export default function DocsNav({ current }) {
   );
 }
 
-/** Prev/next strip so the five pages form a readable path, not five islands. */
+/** Prev/next strip so the six pages form a readable path, not six islands. */
 export function DocsPager({ current }) {
   const i = DOC_PAGES.findIndex((p) => p.path === current);
   const prev = i > 0 ? DOC_PAGES[i - 1] : null;

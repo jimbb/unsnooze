@@ -43,232 +43,46 @@ existing tool solves only a slice of it:
 | Survives laptop sleep & weekly-scale waits | ✅ epoch polling | partial | partial | n/a |
 | Settings + first-run wizard | ✅ | ❌ | ❌ | ❌ |
 
-## Trust & security
-
-unsnooze is a **scheduler that presses your keys — not an auto-approver.** It waits
-for your usage limit to reset, then resumes the *same* session. It never changes how
-your agent handles permissions.
-
-- **Types only after proving the pane is yours.** Every keystroke requires both
-  *identity* (a tmux `@unsnooze_owner` stamp, else a lease = process id + birth
-  time — a mismatch vetoes, because pane ids get recycled) and *liveness* (your
-  agent is still running there). Pane closes require proven identity (idle
-  threshold too for `resumed` panes). Ownership unprovable → it reopens a fresh
-  session instead of typing.
-- **See before you trust: `unsnooze preview`.** A true dry-run — it prints exactly
-  what would be typed, where, and why (or what's holding it back), and sends
-  nothing. Preview shares its decision code with the real dispatcher, so it cannot
-  drift from what dispatch actually does.
-- **Answers Claude's limit menu safely — never a blind Enter.** It locates the
-  cursor and the **"Stop and wait for limit to reset"** option and computes the
-  exact moves. Unreadable menu → it presses nothing. It will never select
-  "Upgrade your plan." Toggle with `menuAutoAnswer`.
-- **No `--dangerously-skip-permissions`, no auto-trust, no auto-approve.** unsnooze
-  never passes bypass flags, never presses "Yes, I trust this folder," and never
-  touches MCP config. Whatever your agent does *after* resuming is governed by
-  **its own** permission model — the same as if you'd typed the message yourself.
-- **Nearly zero network, zero telemetry.** One version check to
-  `registry.npmjs.org` (nothing identifying; `updateCheck=false` turns it off), and
-  push notifications only if *you* configure an ntfy topic. State stays local under
-  `~/.unsnooze`.
-- **Reversible install.** The settings hook and rc-file wrappers are backed up
-  first (`*.unsnooze-orig` pristine + `*.unsnooze-bak` rolling); `unsnooze
-  uninstall` removes every change. Releases are published with npm provenance.
-- **Fleet adds no network surface.** No listening ports, no custom auth, no
-  tokens. Transport is your own OpenSSH (`~/.ssh/config`, keys, agent);
-  unsnooze never sets `StrictHostKeyChecking=no` and fails fast on unknown
-  hosts instead of auto-trusting them.
-- **The remote is the authority.** Fleet resume only marks a session due —
-  the remote daemon types under its own gates (foreground, idle, your
-  configured message only). A compromised viewer cannot make a remote type
-  anything else.
-- **Remote output is untrusted.** Everything a host returns is
-  control-character-stripped and length-capped before it touches your
-  terminal (ANSI-injection defense), and parsed fields are extracted —
-  never merged — into fresh objects.
-- **Lock a key to unsnooze (optional, recommended for automation):**
-  `command="unsnooze _remote",restrict ssh-ed25519 AAAA… unsnooze-fleet`
-  in the remote `authorized_keys` confines that key to the fleet
-  entrypoint — it can never open a shell.
-
-**Honest limits:** unsnooze *does* inject keystrokes into your live terminal on
-your behalf, and it does not sandbox your agent or defend against prompt
-injection / malicious repos — that's your agent's job. Full threat model, residual
-risks, and vulnerability reporting: **[SECURITY.md](SECURITY.md)**.
-
-## Supported CLIs
-
-- **Claude Code** — dual-channel detection: the `StopFailure` hook (authoritative,
-  carries `session_id`) plus multiplexer pane scraping for banners and the interactive
-  limit menu (always answered with *"Stop and wait for limit to reset"*, never a
-  blind Enter). Dead sessions revive via `claude --resume <id>`.
-- **OpenAI Codex CLI** — scrape-based (Codex fires no event on limits). Detects
-  the exact `■ You've hit your usage limit …` banner strings from the Codex
-  source, parses `try again at 3:51 PM` / `Feb 23rd, 2026 9:01 PM` /
-  `in 4 days 20 hours 9 minutes`. Dead sessions revive via
-  `codex resume <id> "<message>"` — the prompt travels in argv.
-- **Grok Build (xAI)** — ⚠️ *experimental*. Hook channel works (Grok reads
-  Claude-compatible hooks, including `StopFailure`); the limit banner text is
-  not publicly documented, so detection uses generic patterns with a safe
-  fallback. Hit a banner unsnooze missed? Run `unsnooze report` and paste the
-  capture into an issue — that's how this adapter gets good.
-- **Qwen Code** — ⚠️ *experimental*. Dual-channel: a Claude-shaped `StopFailure`
-  hook installed into `~/.qwen/settings.json` (fires with `error: rate_limit`)
-  plus scraping for the verbatim quota renders (`Qwen OAuth quota exceeded`,
-  Coding Plan `Allocated quota exceeded`, and OpenRouter `Rate limit exceeded:
-  limit_…` passthroughs). Qwen never shows a reset time, so waits use the
-  5-hour fallback and self-correct on verify. Dead sessions revive via
-  `qwen --resume <id>` (session ids come from the `*.runtime.json` sidecars
-  qwen writes for exactly this purpose).
-- **Kimi CLI (Moonshot)** — ⚠️ *experimental*. Scrape-based: kimi retries a 429
-  three times within seconds, then stops with a red `LLM provider error: Error
-  code: 429 … rate_limit_reached_error` line — that's the detection anchor.
-  The 429 body carries no reset time (5h fallback + verify). Dead sessions
-  revive via `kimi -r <id> -p "<message>"` — with a guard: kimi silently starts
-  a *new* session for unknown ids, so the id is verified on disk first
-  (`--continue` otherwise). `Membership expired` (402) is notify-only.
-- **OpenCode** — ⚠️ *experimental*, and a different shape: OpenCode *retries
-  rate limits itself, forever*, honoring `retry-after` (it will sleep hours
-  until the reset, showing `Rate Limited [retrying in 2h5m attempt #4]`). So
-  unsnooze records the stop but never touches a live self-retrying pane; its
-  job is reviving sessions whose process died mid-wait (laptop slept, tmux
-  gone) via `opencode -s <ses_id>`, with the reset time parsed straight from
-  the banner countdown. Zen plan banners (`5 hour/weekly/monthly usage limit
-  reached…`) and OpenRouter passthroughs are detected too; `insufficient
-  credits` (402) is notify-only.
-- **Antigravity CLI (Google, `agy`)** — ⚠️ *experimental*. The Gemini-CLI
-  successor. Scrapes the forum-reported quota strings (`Model quota limit
-  exceeded`, `Refreshes in 6 days and 18 hours` — parsed, multi-day refresh =
-  the weekly cap) and treats `503 MODEL_CAPACITY_EXHAUSTED` as a transient
-  overload, not a limit. Dead sessions revive via `agy --conversation=<id>`
-  (ids from `~/.gemini/antigravity-cli/history.jsonl`). Like Grok: closed
-  source, so `unsnooze report` captures make this adapter better.
-- **Cursor CLI (`cursor-agent`)** — ⚠️ *experimental*, and the only adapter
-  whose limit is **not waitable**. Cursor's included usage resets on your
-  monthly *billing cycle*, not a rolling window, so unsnooze deliberately never
-  schedules a wake for it: the banner is classified as a model limit, which
-  probes every 15/30/60 min and resumes the moment it clears (you switch to
-  Auto, enable on-demand, or the cycle rolls) instead of sleeping for weeks.
-  The banner text is server-provided — the CLI renders `Error: <title>` plus a
-  detail line and `key: value` extras — and the patterns are pinned against a
-  real captured limit (whose own reset date was a month out, which is the point).
-  `unsnooze report cursor` is how the rest gets better. Transport errors take the transient-overload ladder and
-  `Authentication required` is notify-only. Dead sessions revive via
-  `cursor-agent --resume=<id>` — ids come from `~/.cursor/chats/<md5 of the
-  cwd>/<chatId>/meta.json`, which records the `cwd` so every candidate is
-  verified before use — and `--continue` otherwise, which is workspace-scoped.
-
-  The wrapper shadows **`cursor-agent`** only. The bare `cursor` command is the
-  IDE launcher (`cursor .`) and is never touched; the newer `agent` alias is
-  left alone too, being too generic a name to shadow safely.
-
-**OpenRouter** (the API gateway) isn't a separate agent: its 429 bodies
-(`Rate limit exceeded: limit_rpd/…`, free-models-per-day) are detected inside
-the CLIs that use it (OpenCode, Qwen Code), and credit exhaustion (402) is
-surfaced as a notification — there's no reset to wait for, only a top-up.
-
-### Proxy launchers such as Headroom
-
-`headroom wrap claude` and `headroom wrap codex` resolve and launch the real
-agent executable directly. That bypasses Unsnooze's shell-function launcher,
-so no same-pane monitor is attached. Claude's installed `StopFailure` hook can
-still record stops, as can the transcript/rollout watcher while the daemon,
-`guiWatch`, and that agent are enabled. For full pane monitoring too, configure
-Headroom's provider-scope persistent routing, then start `claude` / `codex`
-normally so Unsnooze remains the outer launcher. With Headroom v0.34, one
-explicit setup is:
-
-```bash
-headroom install apply --scope provider --providers manual --target claude --target codex
-```
-
-## Claude Design
-
-Claude Design shares your usual 5-hour and weekly limits with chat, Cowork and
-Claude Code — so a long design run stops the same way everything else does, and
-unsnooze resumes it the same way. What it needs first is a terminal to run in.
-
-Claude Design has three surfaces. The canvas at `claude.ai/design` and the
-Claude Desktop sidebar are web apps. The third is an official MCP server that
-Claude Code drives from your terminal, and that is the one unsnooze supports:
+## Quick start
 
 ```sh
-unsnooze design setup     # registers the claude-design MCP server
-# then, inside Claude Code:
-/design-login
-unsnooze design           # confirms it is registered and signed in
+npm install -g unsnooze
+unsnooze setup      # pick agents; installs shell wrappers + the Claude hook
 ```
 
-For long design runs, give the session room to compact rather than stall:
+Then use `claude`, `codex` and the rest exactly as before — the wrappers run them
+in a watched pane. When one hits its limit, unsnooze records the stop and wakes it
+the moment the limit resets.
 
 ```sh
-unsnooze config set launchExtraArgs.claude "--autocompact 400000"
+unsnooze status               # tracked sessions + reset countdowns (live dashboard on a TTY)
+unsnooze preview [id]         # dry-run: what would be typed, where, and why — sends nothing
+unsnooze resume-now [id|--all]
+unsnooze usage                # burn rate and time-to-limit, before you hit the wall
+unsnooze doctor [--fix]       # install health check
 ```
 
-**unsnooze does not automate the web canvas, and will not.** Anthropic's
-Consumer Terms bar accessing Claude "through automated or non-human means,
-whether through a bot, script, or otherwise", and accounts have been terminated
-for it. Claude Code is the documented exemption — which is exactly what
-unsnooze drives. A browser-driving "Design adapter" is not a missing feature
-here; it is one this project declines.
+Needs Node ≥ 20.12 on macOS, Linux or Windows. tmux ≥ 3.2, Zellij, herdr ≥ 0.8
+or cmux give pane-level watching; without one, unsnooze runs headless and still
+catches and resumes stops. Every command: [command reference](https://unsnooze.dev/docs/commands/).
 
-Two things worth knowing:
+## Supported agents
 
-- A signed-out `/design-login` is **not** a usage limit. Waiting will never
-  clear it, so unsnooze reports it separately instead of letting it look like a
-  stop that will resolve itself.
-- Design used to have its own weekly allowance. It does not now — everything
-  draws from one shared pool, which is why `unsnooze usage` already accounts
-  for design work without knowing it is design work.
+| Agent | Detection | Revival |
+|---|---|---|
+| **Claude Code** | `StopFailure` hook + pane + transcripts; answers the limit menu safely | `claude --resume <id>` |
+| **Codex CLI** / ChatGPT app | pane banner + rollout files (exact reset time) | `codex resume <id>` |
+| Grok Build *(experimental)* | hook + pane | `grok --resume <id>` |
+| Qwen Code *(experimental)* | hook + pane | `qwen --resume <id>` |
+| Kimi CLI *(experimental)* | pane | `kimi -r <id>` |
+| OpenCode *(experimental)* | pane (it retries by itself; unsnooze revives it if it dies) | `opencode -s <id>` |
+| Antigravity `agy` *(experimental)* | pane | `agy --conversation=<id>` |
+| Cursor `cursor-agent` *(experimental)* | pane; billing-cycle limit, so it probes instead of scheduling | `cursor-agent --resume=<id>` |
 
-## GUI surfaces (VS Code extension, desktop apps)
-
-Terminal sessions are watched through the shell wrapper and tmux, Zellij, herdr,
-or cmux, with headless watching when no multiplexer is available. Sessions in
-**Claude Code's VS Code extension / desktop app** and **Codex's IDE
-extension / desktop app** have no pane to scrape — so `unsnooze daemon` tails
-the session files those surfaces already write:
-
-- **Claude Code** records every rate-limit stop as a structured entry in its
-  `~/.claude/projects/**.jsonl` transcript (session id, cwd, reset time) —
-  shared by the CLI and the VS Code extension.
-- **Codex** writes a `rate_limits` snapshot (usage %, **exact epoch reset
-  time**) into every rollout under `~/.codex/sessions/` — shared by the CLI,
-  IDE extension, and the **unified ChatGPT desktop app** (July 2026: the Codex
-  app became the ChatGPT app; its bundled `codex app-server` writes the same
-  rollouts to the same store — verified against a real install). On machines
-  where Codex lives only inside ChatGPT.app (no `codex` on PATH), unsnooze
-  automatically resumes through the app-bundled binary
-  (`/Applications/ChatGPT.app/Contents/Resources/codex`).
-  The watcher also recognizes a reported 99% five-hour window followed within
-  one minute by an empty `premium` bucket with no credits, using the previous
-  future reset time. The snapshots must come from the same rollout; 99% alone
-  is not a stop signal. This works across watcher polls and daemon restarts.
-  Since codex-cli 0.145 the failed turn's `task_complete` also carries the
-  limit error itself (`codex_error_info: "usage_limit_exceeded"` plus the
-  banner text), and unsnooze reads that too — it is the only signal when
-  Codex runs behind an OpenAI-compatible proxy (`model_providers.<x>.base_url`),
-  where the rate-limit headers never reach Codex and every snapshot has empty
-  windows. The banner's time is parsed like a scraped pane; "Try again later."
-  takes the probe path. Reverted threads (the desktop app's edit/regenerate,
-  `/undo`) continue in `rollout-<ts>-<thread id>_<rollout id>.jsonl`; those
-  files are watched and resumed by the stable thread id.
-- **Claude desktop (cowork) sessions** *(experimental, macOS)* run in
-  sandboxes under `~/Library/Application Support/Claude`; unsnooze watches
-  those too and revives with the session's isolated `CLAUDE_CONFIG_DIR`
-  (plus the keychain-scope override that keeps auth working — verified
-  against a real desktop session).
-
-When the limit resets, the session is revived **in a multiplexer pane** with
-`claude --resume <id>` / `codex resume <id>` — it's the same session file, so
-the continued conversation stays visible in the GUI's own history. (Resuming
-*inside* the GUI panel isn't possible today: no extension/app exposes an
-IPC/URI that can send a prompt.)
-
-Enable it in `unsnooze setup` (installs a launchd agent / systemd user unit;
-on Windows the daemon is started on demand instead — see [Windows](#windows)),
-or run `unsnooze install --daemon` / `unsnooze daemon` yourself. Turn it off
-anytime with `unsnooze config set guiWatch off`.
+GUI sessions (Claude Code's VS Code extension, the ChatGPT/Codex desktop app,
+Claude desktop) are watched through the files they already write, by the optional
+daemon. Per-agent details, OpenRouter, proxy launchers like Headroom, and Claude
+Design: [supported agents](https://unsnooze.dev/docs/agents/).
 
 ## How it works
 
@@ -276,654 +90,55 @@ anytime with `unsnooze config set guiWatch off`.
 <img src="assets/how-it-works.png" alt="architecture: claude/codex/grok panes are watched by unsnooze via hooks and banner scraping; stops land in state.json; the resumer daemon sleeps until the limit resets, then types into live panes or reopens dead ones until every session is running again" width="880"/>
 </div>
 
-<details>
-<summary>text version</summary>
-
-```
-claude / codex / grok (shell wrapper) ──► unsnooze _run <agent> ──► CLI in mux pane
-                                              │
-                                              ├─ per-pane monitor (scrapes for limit
-                                              │  banners, drives Claude's limit menu,
-                                              │  seconds-scale retry on 5xx/overload)
-                                              │
-StopFailure hook (claude, grok) ──────────────┤
-                                              ▼
-                                ~/.unsnooze/state.json
-                                { agent, sessionId, cwd, pane, resetAt, status }
-                                              │
-                                              ▼
-                                resumer daemon (singleton, epoch-polling —
-                                survives laptop sleep and weekly-scale waits)
-                                              │
-                          ┌───────────────────┴────────────────────┐
-                 pane still alive?                          pane gone?
-                 send resume message into it                new multiplexer pane,
-                 (only if the CLI is foreground             `unsnooze _run <agent>
-                 and not mid-stream)                        --resume <id>`, verify
-```
-
-</details>
-
-Detection uses agent hooks, saved session files, and terminal banners. Reset
-times come from the agent's saved timestamp or the banner text, parsed DST-safe.
-When no reset time is available, unsnooze probes on a backoff schedule. Every
-resume is verified afterwards (banner came back → reschedule from the fresh
-banner, capped at 5 attempts).
-
-## Know the wall before you hit it
-
-Recovery (auto-resume) is only half the job. **Prevention** is knowing when the
-wall is coming — so you can `/compact`, pause, or switch models *before* a stop.
-
-```sh
-unsnooze usage                         # burn rate, % used, time-to-limit
-unsnooze usage --json                  # stable machine shape (exit 2 past warn %)
-unsnooze usage --install-statusline    # opt-in: exact Claude % via statusline
-unsnooze usage --uninstall-statusline  # remove the shim, restore your statusLine
-```
-
-```text
-$ unsnooze usage
-unsnooze usage — account burn & time-to-limit  (daemon: running · warnings at 80,95%)
-
-  claude  5h      [█████████████░░░░░░░]  ~64%  (calibrated from 4 stops)
-          burn    ~31k weighted tok/min over last 42 active min
-          wall    ~1h 10m at this pace · window resets 8:00 pm (absolute)
-
-  codex   5h      [███░░░░░░░░░░░░░░░░░]  5% used  (exact)
-          monthly [██░░░░░░░░░░░░░░░░░░]  5% used  (exact) · resets Aug 11
-          burn    idle — no active burn
-
-  Estimates are a lower bound: Claude quotas are account-pooled with claude.ai/Desktop.
-  Exact Claude percentages available via: unsnooze usage --install-statusline
-```
-
-| What you get | How |
-|---|---|
-| **Honest labels** | Every figure is tagged `(exact)`, `(calibrated from N stops)`, or `(estimated — percentage unavailable)`. Never a bare %. |
-| **Account-wide burn** | Sums all active sessions **and** subagents (the limit is per-account, not per-pane). Idle gaps >5 min are excluded so a quiet hour doesn't hide a fast burn. |
-| **Time-to-wall** | ETA as a band (not a false-precision minute), cross-checked against known reset times. Weekly shown info-only — no unstable weekly ETA. |
-| **Pre-wall warnings** | Daemon notifies at `%` bands (`usageWarnAt`, default `80,95`) **and** time tiers (30 / 10 min). Deduped once per window. |
-| **`/compact` nudge only** | Warnings may *suggest* `/compact` so the eventual wake is cheap. unsnooze **never auto-types it** (same security rule as resume: types only your configured message). |
-
-**Provenance ladder** (why this isn't another guessed-quota dashboard):
-
-1. **`(exact)`** — Codex when a recent local rollout contains `token_count.rate_limits` (`used_percent` + epoch reset). Claude only with the opt-in statusline shim (server-authoritative `rate_limits` from [Claude Code's statusline JSON](https://code.claude.com/docs/en/statusline)).
-2. **`(calibrated from N stops)`** — Claude 5-hour token burn vs a ceiling learned from **your matching usable calibration samples**: a stop classified as `5h`, with a nonzero local token sample from the same model pool when known, otherwise an unpooled fallback sample. A stop can still be valid for revival without meeting those calibration requirements. Not plan presets, not circular P90-of-history.
-3. **`(estimated — percentage unavailable)`** — used tokens + burn are shown when available, but there is no exact percentage (and a Claude 5-hour row has no matching usable calibration ceiling yet).
-
-**Honest limits:** Claude transcript sums are a **lower bound** — subscription quotas are account-pooled with claude.ai and the Desktop app. Without the statusline shim, Claude tops out at calibrated/estimated. Exact Claude % needs Pro/Max after the first API response of a session (absent after `/clear` and on API auth).
-
-## Usage
-
-On an interactive TTY, `status` / `usage` / `sessions` open a **live dashboard**
-(`unsnooze dashboard`) with the brand logo (`❯` + rising `zzz`), tabs, live
-refresh until you press **`q`** — and mouse support: click tabs and rows,
-wheel to scroll (toggle with `m`; hold Shift — Option in iTerm2 — to select text). Pipes, `NO_COLOR`, `CI`, and `--json` stay plain.
-
-```sh
-claude / codex / grok                  # normal usage — wrapped automatically
-unsnooze status                        # tracked sessions + reset countdowns
-unsnooze dashboard [tab]               # live TUI (status|usage|sessions|doctor|logs|fleet|prompts)
-unsnooze usage [--json]                # account burn & time-to-limit forecast
-unsnooze usage --install-statusline    # opt-in exact Claude % (chains your statusLine)
-unsnooze resume-now [id|--all]         # don't wait for the reset time
-unsnooze cancel [id|--all]             # stop tracking a session
-unsnooze message <id> "text"           # per-session wake message (--clear to reset)
-unsnooze preview [id]                  # dry-run: what WOULD happen right now, and why —
-                                       # nothing is typed or opened
-unsnooze sessions                      # list unsnooze-owned mux sessions + panes
-unsnooze reap [--dry-run|--yes]        # close finished panes / empty sessions (default dry-run)
-unsnooze doctor [--fix]                # install health check + retire old csg leftovers
-unsnooze prompt add [--agent id] [--project path] [--at time|--now] "text"
-                                       # queue a prompt for a NEW session (see Queued prompts)
-unsnooze prompt list [--json]          # list queued prompts
-unsnooze prompt remove <id>            # cancel a queued prompt
-unsnooze prompt clear                  # cancel all pending queued prompts
-unsnooze config list                   # settings (see below)
-unsnooze config set <k> <v>            # e.g. autoResume off
-unsnooze logs [-f]                     # what unsnooze has been doing
-unsnooze update                        # update unsnooze itself
-unsnooze daemon                        # persistent GUI-session watcher (usually run
-                                       # by launchd/systemd via `install --daemon`;
-                                       # on Windows, started on demand)
-unsnooze report [agent]                # capture a pane to report an undetected banner
-unsnooze uninstall [--purge]           # remove wrappers + hooks (+ state with --purge)
-unsnooze help                          # full command list (also -h / --help)
-```
-
-## Queued prompts
-
-Queue a prompt now; unsnooze types it into a **brand-new** agent session — a
-fresh window in a project directory — once a usage limit clears (or at a time
-you choose). It's one-shot: each entry is delivered at most once.
-
-```sh
-unsnooze prompt add "run the full test suite and fix any failures"
-# → interactive agent picker on a TTY; queued for next-reset in the cwd
-
-unsnooze prompt add --agent codex --project ~/code/api --now "ship the release"
-unsnooze prompt add --at "+2h30m" "rebase onto main"   # relative duration
-unsnooze prompt add --at "9pm" "nightly cleanup pass"  # next occurrence of a clock time
-unsnooze prompt add --at 1755000000 "..."              # epoch (seconds or ms), or an ISO-8601 timestamp
-
-unsnooze prompt list [--json]   # id, agent, due, status, cwd, prompt preview
-unsnooze prompt remove <id>     # cancel one pending/launching entry
-unsnooze prompt clear           # cancel every pending/launching entry
-```
-
-Modes:
-
-- **next-reset** (default) — delivered once no future reset time is known for
-  that agent, i.e. once the current limit clears. If unsnooze holds **no
-  reset signal at all** for that agent when you add the entry, there's
-  nothing to wait on — it delivers on the very next daemon tick, and
-  `prompt add` prints a notice to that effect right away. Use `--at` if you
-  want a specific time instead.
-- `--now` — deliver on the next daemon tick, no reset wait at all.
-- `--at <time>` — deliver at a specific time: epoch (seconds or
-  milliseconds), an ISO-8601 timestamp, a `+2h30m`-style relative duration,
-  or a bare clock time (`9pm`, `2:05pm`, `14:30`) rolled to its next local
-  occurrence.
-
-If a delivery attempt lands on a pane that's still limited — the reset
-hadn't actually cleared, or a fresh `--now`/`--at` session hits the wall
-immediately — the entry goes back to pending behind a backoff floor before
-it's retried. That floor applies to every mode, so a failing `--now`/`--at`
-entry can't burn through every retry in the first few seconds the way an
-unthrottled retry loop would. Verified delivery (capped at 5 attempts,
-same as resume) marks it `failed` and sends a notification.
-
-`autoResume` does **not** gate prompt delivery — the queue runs independently
-of session tracking, even with `autoResume off`.
-
-A far-future `--at` entry is expected to keep a transient resumer process
-alive (checking in each tick) until its delivery time arrives, however long
-that is — this is intended, not a leak.
-
-**Fleet:** `--host <name>` queues on a registered host instead of locally.
-`--project` (an absolute remote path) and `--agent` are both required — there's
-no local cwd to default to and no interactive picker over an ssh round-trip.
-The remote host re-validates everything server-side. Delivery feedback comes
-from `unsnooze fleet` / the dashboard's Fleet tab (per-host queued count) and
-that host's own notifications (ntfy reaches your phone from any host, not
-just the one you're sitting at). A host can refuse all queue traffic with
-`remoteQueue: false` (`unsnooze config set remoteQueue off`, env
-`UNSNOOZE_REMOTE_QUEUE=0`, **set on the host being controlled**) — the queue
-verbs then answer a typed "disabled" instead of silently dropping; a remote
-that predates this feature reports a clear "too old" error instead of
-failing silently.
-
-```sh
-unsnooze prompt add --host gpu-box --project /home/me/repo --agent claude --now "..."
-unsnooze prompt list --host gpu-box
-```
-
-**Dashboard:** the **Prompts** tab (`7`) lists queued entries; `a` opens an
-add form (path → agent → when — with a time prompt if you pick "at" — → a
-host step if you have hosts registered → prompt text), `d`/`x` removes the
-selected entry. The Status tab shows a `<n> prompt(s) queued — tab 7` hint
-whenever entries are pending or launching.
-
-## Fleet: sessions on every machine
-
-See and act on unsnooze sessions on other machines from one terminal — over
-your own SSH, no new service to run.
-
-```sh
-unsnooze hosts add work you@work-box.local   # register an ssh destination
-unsnooze hosts list                          # registered hosts
-unsnooze hosts rm work                       # forget a host
-unsnooze fleet [--json]                      # every host's sessions, fanned out over ssh
-unsnooze dashboard fleet                     # live Fleet tab — R resumes a selected stopped session (C cancels)
-```
-
-A registered host needs **unsnooze installed** and **ssh key auth** (no
-passwords) — nothing new to open or configure; fleet rides your existing
-`~/.ssh/config`, keys, and agent. **Before adding a host, connect to it the
-normal way once** (`ssh <host>`) so OpenSSH pins the host key itself —
-unsnooze never weakens host-key checking to skip that step, so an unknown or
-changed host fails fast instead of being silently trusted.
-
-Fleet is *see and mark*, not *type remotely*: `unsnooze fleet` and the
-dashboard's **Fleet** tab list every reachable host's tracked sessions
-(state, reset countdown, attach hint). Selecting a stopped remote session and
-pressing **`R`** (uppercase — lowercase `r` refreshes) only marks it due — the
-remote's own daemon does the actual keystrokes, under the same
-ownership/liveness/menu gates as a local session.
-Resumed and stopped sessions print an attach hint
-(`ssh -t <host> 'tmux new -A -s <session>'` / `zellij attach <session>` /
-`ssh -t <host> 'herdr session attach <session>'`) so
-you can hop over and watch. An unreachable or out-of-date host shows
-`unreachable`/`skew` rather than blocking the rest of the fleet, and falls
-back to its last-known state (marked `stale`) for up to 24h.
-
-### Auth: keys (default) or password
-
-Every host picks its own auth, per host — unsnooze imposes no policy:
-
-- **`key`** (default, unchanged) — the BatchMode-hardened path above. Nothing
-  about a key host changes.
-- **`password`, interactive** (`--source prompt`, the default source when you
-  pass `--auth password` with nothing else) — typed at run time, no-echo, on
-  whichever terminal is running `unsnooze fleet`/`hosts test`. Nothing is
-  stored. There's no terminal under the background daemon, so a `prompt`
-  host is naturally interactive-only — it shows `needs-auth` when the daemon
-  or a piped/non-TTY caller tries it.
-- **`password`, stored** (`--source env|keychain|command`) — resolved
-  automatically, so the daemon and `unsnooze fleet` can reach it unattended.
-
-```sh
-unsnooze hosts add <name> <dest>
-    [--auth key|password]                  # default: key
-    [--source prompt|env|keychain|command] # default: prompt, once --auth password is set
-    [--env <VARNAME>]                      # env source: var to read (default UNSNOOZE_PW_<NAME>)
-    [--service <s> --account <a>]          # keychain source (macOS only)
-    [--cmd '<command>']                    # command source: program whose stdout is the password
-unsnooze hosts test <name>                 # pre-flight: resolves the source (never prints the
-                                            #   secret) then a real ssh reachability probe
-```
-
-Examples:
-
-```sh
-unsnooze hosts add laptop me@laptop.local --auth password
-# → prompts for a password every time it's used from a real terminal
-
-unsnooze hosts add gpu ubuntu@gpu.example.com --auth password --source env --env UNSNOOZE_PW_GPU
-# → export UNSNOOZE_PW_GPU=... in your shell/session first
-
-unsnooze hosts add mac me@mac-mini.local --auth password --source keychain --service unsnooze-mac --account me
-# → macOS only; reads via `security find-generic-password`
-
-unsnooze hosts add ci ci@build.example.com --auth password --source command --cmd 'op read op://vault/ci/password'
-# → any OS; runs your own secret manager and reads its stdout
-
-unsnooze hosts test gpu   # resolves the credential + probes reachability; prints "auth ok" or a hint, never the secret
-```
-
-**`command` is the portable, first-class source** — plug in whatever secret
-manager you already run. Per-OS one-liners for `--cmd`:
-
-| OS | Example `--cmd` |
-|---|---|
-| macOS | `security find-generic-password -s <service> -a <account> -w` |
-| Linux | `pass show <path>` &nbsp;or&nbsp; `secret-tool lookup <attr> <value> ...` |
-| Windows | `powershell -Command "..."` (e.g. wrapping `Get-StoredCredential`) &nbsp;or&nbsp; `op read op://vault/item/password` |
-| any OS | `op read op://vault/item/password` (1Password CLI), or any other manager's read command |
-
-`keychain` is a convenience built-in for **macOS only** (`security
-find-generic-password`) — there's no dependable dependency-free store to
-shell out to on Windows or Linux, so those use `--source command` with the
-recipes above instead.
-
-**Security posture:** the password reaches `ssh` through OpenSSH's own
-`SSH_ASKPASS` hook — it never appears on `argv`, in `ps`, or in unsnooze's
-own environment; it flows helper-stdout → ssh, in-process, for that one ssh
-child only. unsnooze itself **stores no plaintext**: `keychain`/`command`
-delegate entirely to the OS store or your own manager, and `env` is
-user-managed (readable by your own shell already — positioned as a
-low-friction/CI convenience, not secret-manager-grade). Keys remain the
-default and their BatchMode-hardened path is untouched by any of this.
-
-**Windows note:** native `ssh.exe` (Windows' built-in OpenSSH client) prompts
-fine out of the box for an **interactive** `prompt`-source host — no shim
-needed, it's the zero-friction path. **Stored** sources (`env`/`keychain`/
-`command`) need a non-interactive askpass helper, and native `ssh.exe`
-requires that to be a real launchable `.exe` — it won't reliably run a `.js`
-or npm's `.cmd` shim. Until unsnooze ships that native launcher, use a
-**Git-for-Windows or WSL `ssh`** (both accept the script-based helper the
-same way macOS/Linux do — common on dev machines already) for stored
-password hosts on Windows; a plain `ssh <host>` prompt works with native
-`ssh.exe` regardless.
-
-## Settings
-
-`unsnooze setup` writes `~/.unsnooze/config.json`; change anything later with
-`unsnooze config set`:
-
-| key | default | meaning |
-|---|---|---|
-| `multiplexer` | `auto` | Backend to use: `auto`, `tmux`, `zellij`, `herdr`, `cmux`, or `headless`. `auto` prefers the current multiplexer (tmux/zellij ambient env, then `CMUX_SOCKET_PATH`); with no ambient env it falls back to whichever of tmux/zellij is installed, tmux as the tie-breaker — cmux is only selected via its ambient env or an explicit setting, never by this installed-backend fallback, since it has no attach-from-outside path to wrap into. cmux support covers resume-in-place (detect, capture, send); it has no joinable named-session model, so idle-session reaping (`unsnooze reap`) does not cover cmux panes, and no attach hint is shown for cmux sessions. `headless` is the no-multiplexer mode (see [Watching without a multiplexer](#watching-without-a-multiplexer)) — `auto` falls back to it only when no multiplexer is installed at all, never ahead of one. |
-| `autoResume` | `true` | Master switch. Off = stops are still tracked, but nothing is resumed until you run `unsnooze resume-now` or turn it back on. |
-| `menuAutoAnswer` | `true` | May unsnooze answer Claude's limit menu (send keys in your pane)? Off = watch-only. |
-| `notifications` | `true` | Master switch for all notifications (limit detected / session resumed / gave up). Off = silence every channel. |
-| `notifyChannel` | `auto` | How to deliver: `auto`, `native`, `osc`, or `bell` (see [Notification channels](#notification-channels)). Env: `UNSNOOZE_NOTIFY_CHANNEL`. |
-| `guiWatch` | `true` | May the daemon watch session files for GUI-surface stops (VS Code extension, desktop apps)? Needs the daemon running (`unsnooze install --daemon`). |
-| `resumeMessage` | *"Continue where you left off…"* | The message sent to wake a session. Override it for a single session with `unsnooze message <id> "…"` — visible in `unsnooze status`. |
-| `resumeMessages.claude` / `.codex` / `.grok` / `.qwen` / `.kimi` / `.opencode` / `.agy` / `.cursor` | `""` | Per-agent override of `resumeMessage`. Empty = use the global message; clear one with `unsnooze config set resumeMessages.claude ""`. |
-| `resumeExtraArgs.claude` / `.codex` / `.grok` / `.qwen` / `.kimi` / `.opencode` / `.agy` / `.cursor` | `""` | Extra flags for launches unsnooze performs itself. A revival spawns the agent binary directly, so flags you normally get from a shell alias or wrapper (`--dangerously-skip-permissions`, `--model …`) do not apply unless you put them here. Quoting is respected: `--append-system-prompt "stay in this repo"` is two arguments, not five. `config.json` may also hold an array (`["--append-system-prompt", "stay in this repo"]`), which skips parsing entirely. |
-| `launchExtraArgs.claude` / `.codex` / `.grok` / `.qwen` / `.kimi` / `.opencode` / `.agy` / `.cursor` | `""` | Extra flags for the sessions **you** start through the shell wrapper — the launch-side twin of `resumeExtraArgs`. Use it for flags that have to hold for the whole session: `unsnooze config set launchExtraArgs.claude "--autocompact 400000"` keeps a long, context-heavy run compacting instead of stalling. Flags are placed before your own arguments, since `claude "do the thing"` puts a positional prompt there. Revivals inherit them too, so a flag survives the wake. |
-| `agents.claude` / `agents.codex` | `true` | Which CLIs are guarded. |
-| `agents.grok` / `agents.qwen` / `agents.kimi` / `agents.opencode` / `agents.agy` / `agents.cursor` | `false` | Experimental adapters — off by default; enable in `unsnooze setup` or `unsnooze config set agents.qwen on`. |
-| `workspaceGuard` | `inform` | Repo changed while a session slept? `inform` wakes it with a heads-up in the message; `pause` holds it (desktop notification, diff shown on `resume-now`); `off` disables. |
-| `contextGuard` | `inform` | Big cold context at wake? Waking a session re-reads its **entire context at full uncached price** ([why](#why-did-resuming-a-big-session-eat-so-much-of-my-quota)). `inform` resumes and notifies you of the size; `pause` holds sessions above the threshold for `unsnooze resume-now`; `off` disables. Claude Code only for now. |
-| `contextGuardTokens` | `100000` | Context-size threshold (tokens) at which `contextGuard` notifies or holds. |
-| `usageWarn` | `notify` | Pre-wall usage warnings from the daemon (`unsnooze usage`): `notify` or `off`. Needs `notifications` on and the daemon running. Env: `UNSNOOZE_USAGE_WARN`. |
-| `usageWarnAt` | `80,95` | Percent thresholds for usage warnings (comma-separated). Non-numeric values fall back to the default — never silently disable. Time tiers (30 / 10 min) are constants, not config keys. Env: `UNSNOOZE_USAGE_WARN_AT`. |
-| `mouse` | `true` | Mouse support in `unsnooze dashboard`: click tabs and session rows, wheel-scroll lists/logs, clickable footer hints. Toggle live with `m`. Hold Shift (Option in iTerm2) to select text while it's on. Env: `UNSNOOZE_MOUSE`. |
-| `reapResumed` | `false` | Opt-in: auto-close `resumed` panes idle longer than `reapIdleAfter`. Off by default — use `unsnooze reap --yes` for explicit cleanup. |
-| `reapIdleAfter` | `604800000` (7d) | Idle age (ms) before an opt-in auto-reap closes a `resumed` pane. |
-| `updateCheck` | `true` | Daily new-version check (a plain GET to the npm registry, nothing identifying is sent). Notices after commands + one desktop toast per version. |
-| `ntfyTopic` | `""` | [ntfy](https://ntfy.sh) push notifications — **off until set**. Fires *alongside* the local channel on limit-hit / resumed / gave-up. ⚠️ ntfy.sh topics are public — the name is the password. Use an unguessable one, e.g. `unsnooze-$(openssl rand -hex 8)`, a token, or a self-hosted server. |
-| `ntfyServer` | `https://ntfy.sh` | ntfy server base URL (self-hosted servers welcome). |
-| `ntfyToken` | `""` | Optional `tk_…` access token (`Authorization: Bearer`) for reserved topics / authed servers. |
-| `ntfyPrivacy` | `full` | `terse` keeps directory paths out of pushed bodies (titles only) — recommended on public ntfy.sh topics. |
-| `remoteQueue` | `true` | Set **on the host being controlled**: may other hosts queue prompts on this one (`unsnooze prompt add --host <this>`)? Off = the queue verbs answer a typed `disabled` instead of silently dropping. Env: `UNSNOOZE_REMOTE_QUEUE`. |
-
-Every setting also has a `UNSNOOZE_*` env override (see `src/settings.js`), and
-all timings/paths are tunable via `UNSNOOZE_*` env vars (see `src/config.js`).
-
-### Multiplexer session names
-
-Interactive launches own the base session name (default **`unsnooze`**); a second
-concurrent terminal takes `unsnooze-2`, etc. The resumer daemon may **join** a
-live session but only ever **creates** `unsnooze-resumed`, so a revived agent
-never steals the interactive name.
-
-| env | default | meaning |
-|---|---|---|
-| `UNSNOOZE_SESSION_NAME` | `unsnooze` | Interactive base session name (also accepts legacy `UNSNOOZE_TMUX_SESSION`). |
-| `UNSNOOZE_RESUME_SESSION` | `<base>-resumed` | Session the daemon creates when the pane's original session is gone. |
-
-Find revived agents with `unsnooze status` (prints an attach hint when the
-session is live), `unsnooze sessions`, or e.g. `tmux attach -t unsnooze-resumed`.
-
-### Notification channels
-
-When a limit is hit, a session resumes, or unsnooze gives up, it can alert you
-via an OS toast, a terminal OSC sequence, a BEL, or a mix — controlled by
-`notifyChannel` (default `auto`). `notifications=false` (or
-`UNSNOOZE_NOTIFICATIONS=off`) turns every channel off.
-
-| channel | what it does |
-|---|---|
-| `auto` | OSC (when the terminal supports it) **plus** BEL on the pane tty; falls back to native only if OSC delivered nothing (avoids double banners). No pane / non-tmux mux → native. |
-| `native` | OS toast (macOS `osascript`, Linux `notify-send`, WSL/Windows PowerShell toast); tmux `display-message` as a last-resort statusline fallback on other platforms. |
-| `osc` | Force OSC to attached client ttys; native if zero deliveries. |
-| `bell` | BEL to the pane tty; native if undeliverable. |
-
-**Terminal support (OSC)** — detection uses `TERM_PROGRAM` / termname / known
-env markers:
-
-| terminals | sequence |
-|---|---|
-| iTerm2, kitty, WezTerm, Ghostty, Warp | OSC 9 (`\x1b]9;title: body\x07`) |
-| rxvt / urxvt | OSC 777 (`\x1b]777;notify;title;body\x07`) |
-| Apple Terminal, VS Code, Alacritty, Zed | denylisted — OSC skipped (prefer `native`; force `osc` does not unlock these) |
-| unknown | skipped in `auto`; OSC 9 when `notifyChannel=osc` |
-
-**tmux only for OSC/BEL.** Those paths write to the client's tty (OSC) or the
-pane's tty (BEL), which requires tmux's client/pane tty APIs. **Zellij has no
-equivalent**, so OSC/BEL are not attempted under Zellij — notifications fall
-back to native (and Zellij has no statusline-inject equivalent either). GUI
-watcher stops (no pane context) always use native.
-
-## Safety properties
-
-- **Never injects blind**: keys are only sent when the pane's foreground
-  process is the agent CLI and no "esc to interrupt"-style busy footer is
-  visible. Recycled pane ids can't receive stray messages.
-- **Never picks a menu option blind**: if Claude's limit menu layout can't be
-  read, unsnooze does not press Enter (that could confirm "Upgrade your plan").
-- **Sleep-safe waits**: the resumer polls wall-clock against the target epoch
-  every 30s instead of one long timer — a laptop asleep past the reset fires
-  on the next tick. Weekly limits are just a bigger epoch.
-- **Verified resumes**: after dispatch it re-captures the pane; if the limit
-  banner reappears (reset time misparsed / not actually reset), it reschedules
-  from the fresh banner, capped at 5 attempts.
-- **Concurrent-writer safe**: state updates go through a mkdir lock + atomic
-  rename; corrupt state is quarantined, never fatal (the hook path must never
-  block the CLI).
-- **Overload ≠ limit**: 5xx/529/429 transient errors take a seconds-scale
-  backoff path ([30,60,120,240,300]s ± jitter) and never enter the ledger.
-- **Stale-workspace guard**: the repo's HEAD + dirty state are fingerprinted
-  when a session stops. If another session (or you) changed the repo before
-  the wake, the resumed agent is told to re-read before acting — or, with
-  `workspaceGuard=pause`, the session is held and `unsnooze resume-now`
-  shows the diff first.
-- **Cold-cache wake guard**: waking a session after hours means the provider's
-  prompt cache is long expired — the first message re-reads the entire
-  context at full price, and a fat session can eat a real slice of the fresh
-  quota window. unsnooze estimates the size from the session transcript
-  (shown as `ctx ~152k tok` in `unsnooze status`) and, per `contextGuard`,
-  notifies you or holds the session instead of spending it silently.
-
-## Requirements
-
-- Node ≥ 20.12
-- macOS, Linux, or Windows — natively on all three (see
-  [Watching without a multiplexer](#watching-without-a-multiplexer))
-- tmux ≥ 3.2, Zellij, **or** herdr ≥ 0.8.0 for pane-level watching. Optional:
-  without one, unsnooze runs `headless` and still catches and resumes stops.
-- zsh or bash (wrappers go into `~/.zshrc` / `~/.bashrc`), fish (wrappers go
-  into `~/.config/fish/config.fish`), or PowerShell
-  (wrappers go into `$PROFILE.CurrentUserAllHosts`)
-
-Fish wrappers are installed when fish is the login shell or its config already
-exists. An absolute `XDG_CONFIG_HOME` changes the config location to
-`$XDG_CONFIG_HOME/fish/config.fish`; `unsnooze install --fishrc <path>` and
-`unsnooze uninstall --fishrc <path>` override it explicitly. After upgrading an
-existing install, run `unsnooze setup` and open a new shell to load the wrappers.
-
-Agent help/version commands, such as `claude --help` and `codex --version`, run
-directly without a multiplexer session, pane monitor, `launchExtraArgs`, or an
-unsnooze update notice. `unsnooze help` still shows unsnooze's own commands.
-
-### Supported terminals
-
-unsnooze drives four terminal multiplexers, and works without one.
-
-| | [tmux](https://github.com/tmux/tmux) ≥ 3.2 | [Zellij](https://zellij.dev) | [herdr](https://herdr.dev) ≥ 0.8.0 | [cmux](https://cmux.dev) | `headless` |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Detect a limit stop | pane + hook + transcript | pane + hook + transcript | pane + hook + transcript | pane + hook + transcript | hook + transcript |
-| Resume a live session in place | ✅ | ✅ | ✅ | ✅ | — |
-| Answer Claude's limit menu | ✅ | ✅ | ✅ | ✅ | — |
-| Revive a session whose pane died | ✅ | ✅ | ✅¹ | ✅² | ✅³ |
-| Wrap a bare `claude` into a managed session | ✅ | ✅ | ✅ | — | n/a⁴ |
-| `unsnooze reap` idle sessions | ✅ | ✅ | ✅ | — | — |
-| `attach:` hint in `unsnooze status` | ✅ | ✅ | ✅ | — | — |
-| OSC notifications to your terminal | ✅ | — | — | — | — |
-
-¹ Into a fresh session name (`unsnooze-2`), never by restarting the stopped one —
-herdr restores saved agent panes itself, so a revival on top would resume the
-same conversation twice.
-² Into a fresh workspace; cmux has no joinable named-session model.
-³ As a detached process. Its output goes to `~/.unsnooze/headless/<session>.log`,
-since there is no scrollback to read it out of later; the prompt rides in argv
-(`claude --resume <id> "…"`, `codex exec resume <id> "…"`), and a revival that
-exits non-zero is retried, with its last output as the `last error` in
-`unsnooze status`.
-⁴ Nothing to wrap into — your own terminal is the session.
-
-Pick one explicitly with `unsnooze config set multiplexer tmux|zellij|herdr|cmux|headless`.
-On `auto`, unsnooze uses the multiplexer you are currently inside; failing that,
-the only one installed (tmux breaks ties); failing that, `headless`.
-
-**Install:** `brew install tmux` or `brew install zellij` on macOS,
-`sudo apt install tmux` on Linux/WSL. herdr comes from
-[herdr.dev](https://herdr.dev) — Homebrew still ships 0.7.3, which `available()`
-refuses, so take the release binary.
-
-### Watching without a multiplexer
-
-A terminal pane is only one of unsnooze's three detection channels. The Claude
-Code **StopFailure hook** and the **session transcript watcher** need no pane at
-all — which is what makes native Windows, bare servers and CI work.
-
-When no multiplexer is installed, `multiplexer: auto` resolves to `headless`:
-
-| | with tmux/Zellij/herdr | `headless` |
-|---|---|---|
-| detects limit stops | pane scrape + hook + transcript | hook + transcript |
-| resumes at reset | yes | yes |
-| answers Claude's limit menu | yes | no |
-| waits out a busy pane | yes | no |
-| revived session | live pane you can attach to | detached process, output in `~/.unsnooze/headless/` |
-
-`headless` is never chosen ahead of a real multiplexer — only when none is
-installed, or when you ask for it with
-`unsnooze config set multiplexer headless`. If you want the full behaviour on
-Windows, WSL is still the better home.
-
-### Windows
-
-Native Windows works: PowerShell wrappers, a cmd-safe StopFailure hook, and a
-daemon started on demand. Install as usual and run `unsnooze doctor` to confirm.
-
-unsnooze registers nothing to run at sign-in on Windows — no Scheduled Task, Run
-key or Startup-folder entry. (Up to 1.19.1 it created a logon Scheduled Task,
-and Microsoft Defender flagged setup as `Trojan:Win32/Commando.A!ml` for it;
-`unsnooze uninstall` removes one left behind.)
-Setup starts the daemon instead, and every agent you launch from PowerShell and
-every Claude Code StopFailure hook starts it again whenever it is not running,
-so after a restart it is back as soon as you use an agent. If you only use the
-Codex app or IDE, nothing you do passes through a wrapper or the hook: run
-`unsnooze install --daemon` after signing in to start it.
-
-Three honest caveats. Nothing supervises the daemon the way launchd and systemd
-do, and a running daemon keeps the code it started with, so after upgrading
-unsnooze re-run `unsnooze install --daemon` (or sign out and back in). The
-daemon also keeps the `PATH` it was born with: an agent whose install directory
-changes on update (the Codex Desktop/Store runtime lives under
-`%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>`) can vanish from the daemon's view
-while your shell still finds it — unsnooze looks that directory up at launch
-time, `unsnooze doctor` prints what each agent resolves to, and
-`UNSNOOZE_CODEX_BIN` (or `UNSNOOZE_CLAUDE_BIN`, …) pins a path; point it at an
-`.exe`, since Node cannot launch a `.cmd` shim directly. And stored-password
-fleet hosts still need Git-for-Windows or WSL `ssh`; native `ssh.exe` requires
-an `.exe` askpass helper unsnooze does not yet ship.
-
-WSL remains the richer option, because that is where the Unix multiplexers live
-— and where the agent CLIs often already are:
-
-```sh
-# inside your WSL distro (Ubuntu etc.)
-sudo apt install tmux             # or install Zellij: https://zellij.dev/documentation/installation
-# install herdr from https://herdr.dev (requires herdr >= 0.8.0)
-npm install -g unsnooze && unsnooze setup
-```
-
-On macOS, install either backend with `brew install tmux` or
-`brew install zellij`; install herdr from [herdr.dev](https://herdr.dev).
-herdr >= 0.8.0, which is the version the backend is verified against; older 0.x
-releases are refused by available(). Homebrew currently ships 0.7.3, so install
-the release binary from herdr.dev or GitHub rather than `brew install herdr`.
-In `auto` mode unsnooze uses the multiplexer you are currently inside; choose one
-explicitly with `unsnooze config set multiplexer tmux`, `zellij`, or `herdr`.
-
-#### herdr specifics
-
-herdr differs from tmux and Zellij in four ways that are visible in use:
-
-- **unsnooze never restarts a stopped herdr session.** herdr restores saved
-  agent panes when a session restarts (`resume_agents_on_restore` is on by
-  default), so restarting one can bring your agent back by itself — and a
-  revival on top of that would resume the same conversation twice. Reviving
-  into a stopped session therefore creates `unsnooze-2` (and so on) rather than
-  reusing the name. If you restart a stopped session yourself and herdr brings
-  the agent back, unsnooze may still open a fresh pane for it; that case is not
-  yet detected.
-- **A revived session opens a tab, not a workspace.** A herdr workspace is the
-  project — per repo, the way a tmux *session* is — while a tab is what tmux
-  calls a window. So a revival opens a new tab in whichever workspace herdr
-  already has open on that directory, and only creates a workspace when there
-  is none. (A tab rather than a split: a revived agent draws a full-screen TUI,
-  and halving the pane you are looking at would leave two terminals too narrow
-  to use. Neither steals focus.)
-- **Multi-line resume messages are carried, not typed.** herdr starts a pane
-  command by typing it into the pane's shell, where a newline would submit half
-  a command and a tab would be a completion request. Any such argument is passed
-  through the new tab's environment instead and referenced by the typed line, so
-  a multi-paragraph `resumeMessage` reaches the agent as one argument, byte for
-  byte. (A NUL byte is still refused — an environment value cannot hold one.)
-- **A custom `HERDR_SOCKET_PATH` that does not match the session being
-  addressed disables watching for that pane.** herdr pane ids are per-server,
-  so acting on one from the wrong server could type into an unrelated terminal.
-  The agent still runs; unsnooze says why it is not watching.
-
-Everything works as on Linux, including desktop notifications: inside WSL,
-unsnooze raises **native Windows toasts** through `powershell.exe` (no
-`notify-send` or X server needed).
+Stops are detected from agent hooks, saved session files and terminal banners,
+and recorded in `~/.unsnooze/state.json` with the reset time. A single daemon
+checks the clock every 30 seconds — so a laptop that slept through the reset still
+wakes on time — then types your resume message into the live pane, or reopens the
+session by id if its pane is gone. Every wake is verified; if the limit is still
+there it reschedules, up to 5 attempts.
+
+## Trust & security
+
+unsnooze is a **scheduler that presses your keys — not an auto-approver.**
+
+- **Types only after proving the pane is yours** — an ownership stamp or process
+  lease, plus your agent running and idle there. Unprovable → it opens a fresh
+  session instead of typing.
+- **Never presses a menu option blind**, and never selects "Upgrade your plan".
+- **No `--dangerously-skip-permissions`, no auto-trust, no auto-approve.** What
+  your agent does after the wake is governed by its own permission model.
+- **No telemetry.** One daily version check to npm (`updateCheck=false` turns it
+  off) and ntfy push only if you set it up. State stays in `~/.unsnooze`.
+- **Reversible.** Every file it edits is backed up; `unsnooze uninstall` removes
+  every change. Releases are published with npm provenance.
+- **Fleet (multi-machine) uses your own SSH** — no ports, no tokens, no weakened
+  host-key checking.
+
+It does inject keystrokes into your terminal, and it does not sandbox your agent.
+Full threat model and vulnerability reporting: **[SECURITY.md](SECURITY.md)**.
 
 ## FAQ
 
-### What does "You've hit your usage limit" mean in Claude Code?
+**What does "You've hit your usage limit" mean?** Claude and ChatGPT plans meter
+usage in a rolling 5-hour window plus a weekly cap. When either runs out, the
+agent stops mid-task. Nothing is lost — the session can be resumed after the
+reset, and unsnooze does that for every stopped session automatically.
 
-Claude subscription plans meter usage in a rolling 5-hour window plus a weekly
-cap. When either runs out, Claude Code stops mid-task and shows the banner with
-a reset time ("resets 3pm"). Nothing is lost — the session can be resumed with
-`claude --resume <id>` once the limit resets. unsnooze does exactly that,
-automatically, for every stopped session.
+**Does this get around the rate limit?** No. It waits for the reset exactly like
+you would, resumes once, and checks the limit actually lifted. It replaces the
+4am alarm, not the limit.
 
-### What about Codex — "You've hit your usage limit. Try again at …"?
+More questions and troubleshooting: [unsnooze.dev/docs/troubleshooting](https://unsnooze.dev/docs/troubleshooting/).
 
-Same idea: ChatGPT-plan Codex has 5-hour and weekly windows. The Codex TUI
-stays open at the composer after the banner, so unsnooze either types into the
-live pane or reopens the session with `codex resume <id>` at the reset time it
-parsed from the banner.
+## Documentation
 
-### Does this get around the rate limit?
-
-No. unsnooze waits for the reset exactly like you would, resumes once, and
-verifies the limit actually lifted. It replaces the 4am alarm, not the limit.
-
-### How do I update, and how do I know when to?
-
-`unsnooze update` (or `npm i -g unsnooze`). unsnooze checks the npm registry at most once a day and
-tells you when a newer version exists (a line after CLI commands, plus one
-desktop notification per version); after updating, the next command shows a
-short "what's new" from the changelog. It's a plain registry GET with nothing
-identifying — turn it off with `unsnooze config set updateCheck off`.
-
-### What if another session changed the repo while one was stopped?
-
-unsnooze fingerprints the workspace (HEAD + uncommitted state) at stop time
-and re-checks at wake. By default the session still resumes, but the wake
-message includes what changed ("HEAD abc1234 → def5678 — re-read before
-continuing"). Set `workspaceGuard` to `pause` to hold such sessions for a
-manual `unsnooze resume-now` (which prints the diff stat), or `off` to
-disable the check.
-
-### Why did resuming a big session eat so much of my quota?
-
-Because of prompt-cache expiry, not because of unsnooze. Providers cache your
-session's context so each turn only pays full price for what's new — but that
-cache lives ~5 minutes. After hours stopped at a limit, the cache is long
-gone, so the **first** wake message (unsnooze's, or a hand-typed "continue" —
-identical cost either way; the wake message itself is ~30 tokens) makes the
-API re-read the entire conversation at full uncached price. A ~150k-token
-session on a top-tier model can cost a meaningful slice of a fresh 5-hour
-window the moment it wakes, before any new work happens.
-
-What actually helps: `/compact` (or starting a fresh session with a handoff
-summary) *before* you hit the limit, and keeping overnight sessions lean.
-What unsnooze does: the `contextGuard` setting estimates the context size
-from the session transcript before waking. `inform` (default) resumes and
-notifies you of the price; `pause` holds sessions above `contextGuardTokens`
-(default 100k) until you decide with `unsnooze resume-now`; the estimate is
-also visible per-session in `unsnooze status` (`ctx ~152k tok`).
-
-### Does it work if my laptop was asleep or the terminal was closed?
-
-Yes — reset times are stored as absolute timestamps and checked every 30
-seconds, so a laptop that slept through the reset resumes on the next tick,
-and dead panes are reopened by session id in a fresh multiplexer pane.
-
-## Development
-
-```sh
-npm test                     # unit tests (node:test)
-./scripts/e2e-simulate.sh    # full detect → wait → re-open cycle in a
-                             # scratch tmux session (no real limits needed)
-bash -n scripts/e2e-zellij.sh # syntax-check the reserved-session Zellij smoke test
-node scripts/e2e-herdr.mjs    # drives src/multiplexers/herdr.js against a real herdr (not run by CI)
-vhs demo/demo.tape           # regenerate assets/demo.gif (brew install vhs)
-```
-
-Releases are tagged (`git tag v<version> && git push origin v<version>`) and
-published to npm by CI with [provenance](https://docs.npmjs.com/generating-provenance-statements)
-via trusted publishing — see `.github/workflows/release.yml`.
+- [Install & setup](https://unsnooze.dev/docs/) — terminals, multiplexers, Windows and WSL
+- [Supported agents](https://unsnooze.dev/docs/agents/)
+- [Commands](https://unsnooze.dev/docs/commands/) — usage forecast, queued prompts
+- [Settings & guards](https://unsnooze.dev/docs/settings/) — every config key, notifications
+- [Fleet](https://unsnooze.dev/docs/fleet/) — sessions on every machine over SSH, GUI surfaces
+- [Troubleshooting & security](https://unsnooze.dev/docs/troubleshooting/) — including development setup
+- [Changelog](CHANGELOG.md)
 
 ## License
 

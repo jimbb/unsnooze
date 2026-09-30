@@ -64,6 +64,7 @@ function gitLastModified(files) {
 const ROUTE_SOURCES = {
   '/': ['website/app/page.jsx', 'website/components', 'website/lib/faq-data.jsx'],
   '/docs/': ['website/app/docs/page.jsx'],
+  '/docs/agents/': ['website/app/docs/agents/page.jsx'],
   '/docs/commands/': ['website/app/docs/commands/page.jsx'],
   '/docs/settings/': ['website/app/docs/settings/page.jsx'],
   '/docs/fleet/': ['website/app/docs/fleet/page.jsx'],

@@ -186,7 +186,11 @@ $ unsnooze hosts test gpu
                 <li><strong>Codex</strong> writes a <C>rate_limits</C> snapshot (usage %, exact
                   epoch reset time) into every rollout under <C>~/.codex/sessions/</C> — shared by
                   the CLI, IDE extension, and the ChatGPT desktop app. Where Codex lives only
-                  inside ChatGPT.app, unsnooze resumes through the app-bundled binary.</li>
+                  inside ChatGPT.app, unsnooze resumes through the app-bundled binary. The failed
+                  turn's own limit error (codex-cli 0.145+) is read too, which is the only signal
+                  behind an OpenAI-compatible proxy. Reverted threads (edit/regenerate,{' '}
+                  <C>/undo</C>) continue in a <C>…_&lt;rollout id&gt;.jsonl</C> file and are
+                  resumed by the stable thread id.</li>
                 <li><strong>Claude desktop (cowork) sessions</strong> <em>(experimental,
                   macOS)</em> run in sandboxes under <C>~/Library/Application Support/Claude</C>;
                   revival uses the session's isolated <C>CLAUDE_CONFIG_DIR</C>.</li>
@@ -207,7 +211,10 @@ $ unsnooze hosts test gpu
                 you're inside; pin one with <C>unsnooze config set multiplexer tmux</C>.</p>
               <p><strong>Windows:</strong> works natively — PowerShell wrappers in <C>$PROFILE</C>,
                 a cmd-safe StopFailure hook, and a daemon started on demand by wrapped agents and
-                the Claude hook. Nothing is registered at sign-in; GUI-only users run{' '}
+                the Claude hook. Nothing is registered at sign-in (up to 1.19.1 setup created a
+                logon Scheduled Task, which Microsoft Defender flagged as{' '}
+                <C>Trojan:Win32/Commando.A!ml</C>; <C>unsnooze uninstall</C> removes a leftover
+                one). GUI-only users run{' '}
                 <C>unsnooze install --daemon</C> after signing in. With
                 no multiplexer it runs headless; <C>unsnooze doctor</C> confirms the install and
                 names the binary each agent resolves to (pin one with <C>UNSNOOZE_CODEX_BIN</C>,{' '}

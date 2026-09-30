@@ -126,6 +126,27 @@ unsnooze doctor: all clear — install is healthy.
                 macOS, <C>sudo apt install tmux</C> on Linux/WSL. herdr comes from{' '}
                 <a href="https://herdr.dev">herdr.dev</a> — Homebrew still ships 0.7.3, which
                 unsnooze refuses, so take the release binary.</p>
+
+              <h3>herdr specifics</h3>
+              <ul>
+                <li><strong>A stopped herdr session is never restarted.</strong> herdr restores
+                  saved agent panes when a session restarts (<C>resume_agents_on_restore</C> is on
+                  by default), so a revival on top would resume the same conversation twice.
+                  Reviving into a stopped session creates <C>unsnooze-2</C> and so on instead. If
+                  you restart one yourself and herdr brings the agent back, unsnooze may still
+                  open a fresh pane for it; that case is not yet detected.</li>
+                <li><strong>A revival opens a tab, not a workspace or a split.</strong> A herdr
+                  workspace is the project, so the tab lands in whichever workspace already has
+                  that directory open. Neither steals focus.</li>
+                <li><strong>Multi-line resume messages are carried, not typed.</strong> herdr
+                  starts a pane command by typing it into a shell, where a newline would submit
+                  half of it, so such arguments ride in the new tab's environment and reach the
+                  agent byte for byte. (A NUL byte is still refused.)</li>
+                <li><strong>A mismatched <C>HERDR_SOCKET_PATH</C> disables watching for that
+                  pane.</strong> Pane ids are per-server, so acting from the wrong server could
+                  type into an unrelated terminal. The agent still runs; unsnooze says why it is
+                  not watching.</li>
+              </ul>
             </section>
 
             <section className="doc-sec" id="everyday">
@@ -162,6 +183,9 @@ $ unsnooze cancel --all        # stop tracking everything`}</Shell>
               <p>Setup is the whole of the required reading. Everything else is here when
                 you need it:</p>
               <ul>
+                <li><a href="/docs/agents/"><strong>Supported agents</strong></a> — how each
+                  agent's limit is detected and resumed, OpenRouter and proxy launchers, and
+                  Claude Design.</li>
                 <li><a href="/docs/commands/"><strong>Command reference</strong></a> — every
                   command with real output, the <C>unsnooze usage</C> forecast that tells you
                   when the wall arrives, and the prompt queue that starts the next piece of

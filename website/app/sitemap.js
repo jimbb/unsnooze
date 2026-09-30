@@ -9,6 +9,7 @@ import { lastModifiedFor } from '../lib/lastmod.js';
 const ROUTES = [
   '/',
   '/docs/',
+  '/docs/agents/',
   '/docs/commands/',
   '/docs/settings/',
   '/docs/fleet/',

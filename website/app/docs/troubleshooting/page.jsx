@@ -149,6 +149,43 @@ export default function TroubleshootingDocsPage() {
               </ul>
             </section>
 
+            <section className="doc-sec" id="faq">
+              <h2>Common questions</h2>
+
+              <h3>What does "You've hit your usage limit" mean?</h3>
+              <p>Claude and ChatGPT plans meter usage in a rolling 5-hour window plus a weekly cap.
+                When either runs out, the agent stops mid-task and shows a banner with the reset
+                time. Nothing is lost: the session can be resumed once the limit resets
+                (<C>claude --resume &lt;id&gt;</C>, <C>codex resume &lt;id&gt;</C>). unsnooze does
+                that automatically, for every stopped session — typing into the live pane when it
+                is still open, reopening it when it is not.</p>
+
+              <h3>Does this get around the rate limit?</h3>
+              <p>No. unsnooze waits for the reset exactly like you would, resumes once, and checks
+                the limit actually lifted. It replaces the 4am alarm, not the limit.</p>
+
+              <h3>Does it work if my laptop was asleep or the terminal was closed?</h3>
+              <p>Yes. Reset times are stored as absolute timestamps and checked every 30 seconds
+                instead of one long timer, so a laptop that slept through the reset resumes on the
+                next check, and weekly limits are just a later timestamp. Dead panes are reopened
+                by session id. State writes go through a lock and an atomic rename, so several
+                sessions stopping at once cannot corrupt the ledger; a corrupt file is set aside,
+                never fatal.</p>
+
+              <h3>Why did resuming a big session use so much quota?</h3>
+              <p>Prompt-cache expiry. After hours stopped, the provider's cache is gone, so the
+                first message — unsnooze's or a hand-typed "continue", same cost — re-reads the
+                whole conversation at full price. <C>/compact</C> before the limit helps, and{' '}
+                <a href="/docs/settings/#guards"><C>contextGuard</C></a> tells you (or holds the
+                session) when a wake will be expensive.</p>
+
+              <h3>How do I update?</h3>
+              <p><C>unsnooze update</C> (or <C>npm i -g unsnooze</C>). unsnooze checks npm at most
+                once a day and tells you when a newer version exists; after updating, the next
+                command shows what's new. Turn the check off with{' '}
+                <C>unsnooze config set updateCheck off</C>.</p>
+            </section>
+
             <section className="doc-sec" id="security">
               <h2>Security model</h2>
               <p>unsnooze is a <strong>scheduler that presses your keys — not an
@@ -182,6 +219,7 @@ export default function TroubleshootingDocsPage() {
 $ ./scripts/e2e-simulate.sh     # full detect → wait → re-open cycle in a
                                 # scratch tmux session (no real limits needed)
 $ bash -n scripts/e2e-zellij.sh # syntax-check the Zellij smoke test
+$ node scripts/e2e-herdr.mjs    # drive the herdr backend against a real herdr (not in CI)
 $ vhs demo/demo.tape            # regenerate the demo gif (brew install vhs)`}</Shell>
               <p>Releases are tagged (<C>git tag v&lt;version&gt;</C>, then{' '}
                 <C>git push origin v&lt;version&gt;</C>) and published to npm by CI with provenance
