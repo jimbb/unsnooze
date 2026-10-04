@@ -6,9 +6,11 @@ import { resolveSessionName, SessionCreateError } from './session-name.js';
 
 const execFileAsync = promisify(execFileCb);
 
+// windowsHide: the console-less monitor polls through the async path every few
+// seconds (see workspace.js). The sync new-session needs the real console.
 function defaultSpawner(file, args, { sync = false, ...options } = {}) {
   if (sync) return spawnSync(file, args, options);
-  return execFileAsync(file, args, options).then(({ stdout }) => stdout);
+  return execFileAsync(file, args, { windowsHide: true, ...options }).then(({ stdout }) => stdout);
 }
 
 function envArgs(env = {}) {
