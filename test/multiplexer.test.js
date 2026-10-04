@@ -4,12 +4,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createTmux } from '../src/multiplexers/tmux.js';
+import { createTmux as createAnyTmux, tmuxPaneFromEnv } from '../src/multiplexers/tmux.js';
 import { createZellij } from '../src/multiplexers/zellij.js';
 import { createCmux } from '../src/multiplexers/cmux.js';
 import { createMultiplexerFactory } from '../src/multiplexer.js';
 import { DEFAULTS, getConfig, setConfigValue } from '../src/settings.js';
 import { MUX_NAMES } from '../src/config.js';
+
+// Real tmux semantics on every host (native Windows would select psmux's).
+const createTmux = opts => createAnyTmux({ platform: 'linux', ...opts });
 
 const originalEnv = { ...process.env };
 
@@ -257,6 +260,50 @@ test('tmux backend accepts structured launches and returns paneOwner null', asyn
     '-e', 'TOKEN=value', 'node', 'agent.js',
   ]);
   assert.equal(typeof mux.launchWrapped, 'function');
+});
+
+// psmux (tmux on native Windows) runs new-window's command through pwsh/cmd,
+// so `C:\Program Files\nodejs\node.exe` died at the space and every Claude
+// revival ended in "ready timeout". Only `new-session ... -- argv` is raw.
+test('psmux revives into its own session with raw argv and a session-qualified pane', async () => {
+  const spawner = fakeSpawner((_file, args) => {
+    if (args[0] === 'has-session') return { status: args[2] === 'unsnooze-resumed' ? 0 : 1 };
+    if (args[0] === 'new-session') return 'unsnooze-resumed-2:%1\r\n';
+    return '';
+  });
+  const mux = createAnyTmux({ spawner, env: {}, platform: 'win32' });
+  const node = 'C:\\Program Files\\nodejs\\node.exe';
+  assert.deepEqual(await mux.newWindow('unsnooze-resumed', 'C:\\work', {
+    file: node, args: ['unsnooze.js', '_run', 'codex', 'resume', 'id', 'Continue where you left off.'], env: { TOKEN: 'v' },
+  }), { pane: 'unsnooze-resumed-2:%1', paneOwner: null, session: 'unsnooze-resumed-2' });
+  assert.deepEqual(spawner.calls.at(-1).args, [
+    'new-session', '-d', '-s', 'unsnooze-resumed-2', '-c', 'C:\\work', '-P', '-F', '#{session_name}:#{pane_id}',
+    '-e', 'TOKEN=v', '--', node, 'unsnooze.js', '_run', 'codex', 'resume', 'id', 'Continue where you left off.',
+  ]);
+
+  const wrapped = fakeSpawner((_file, args) => ({ status: args[0] === 'has-session' ? 1 : 0 }));
+  createAnyTmux({ spawner: wrapped, env: {}, platform: 'win32' }).launchWrapped({ file: node, args: ['a b'], env: {} });
+  assert.deepEqual(wrapped.calls.at(-1).args, ['new-session', '-s', 'unsnooze', '--', node, 'a b']);
+});
+
+// psmux answers a target pane that is gone with some OTHER pane: send-keys
+// exits 0 and types into it. Nothing may reach the pane unless it echoes back.
+test('psmux never types into or reads a pane that is gone', async () => {
+  const spawner = fakeSpawner((_file, args) => (args[0] === 'display-message' ? 'mine:%3\n' : ''));
+  const mux = createAnyTmux({ spawner, env: {}, platform: 'win32' });
+  await assert.rejects(mux.sendText('mine:%9', 'Continue'), /can't find pane: mine:%9/);
+  await assert.rejects(mux.capturePane('mine:%9'), /can't find pane/);
+  assert.equal(spawner.calls.some(c => c.args[0] === 'send-keys' || c.args[0] === 'capture-pane'), false);
+
+  await mux.sendKey('mine:%3', 'Enter');
+  assert.deepEqual(spawner.calls.at(-1).args, ['send-keys', '-t', 'mine:%3', 'Enter']);
+});
+
+test('a pane inside psmux names its session, since every session starts at %1', () => {
+  assert.equal(tmuxPaneFromEnv({ TMUX_PANE: '%1', PSMUX_SESSION: 'unsnooze-2' }), 'unsnooze-2:%1');
+  assert.equal(tmuxPaneFromEnv({ TMUX_PANE: '%7' }), '%7');
+  assert.equal(tmuxPaneFromEnv({}), null);
+  assert.equal(createAnyTmux({ spawner: fakeSpawner(), env: { TMUX_PANE: '%1', PSMUX_SESSION: 's' } }).currentPaneId(), 's:%1');
 });
 
 test('launchWrapped names the session, preserves structured argv/env, and returns exit status', () => {
