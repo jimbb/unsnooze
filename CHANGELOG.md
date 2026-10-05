@@ -1,8 +1,11 @@
 # Changelog
 
-## 1.19.5 — 2026-10-04
+## 1.19.5 — 2026-10-05
 
-Sessions resume again under psmux, the tmux port for native Windows.
+Sessions resume again under psmux, Antigravity no longer wakes early, and
+`unsnooze update` updates the copy you are running.
+
+### psmux (tmux on native Windows)
 
 - Every Claude revival in psmux failed five times with `ready timeout`. psmux
   ran the launch command through a shell, so the space in
@@ -13,6 +16,22 @@ Sessions resume again under psmux, the tmux port for native Windows.
   sends keys for a pane that has closed to some other pane, and every psmux
   session numbers its first pane `%1`. unsnooze now addresses panes as
   `session:%N` and checks the pane still exists before reading or typing (#43).
+
+### Antigravity (`agy`)
+
+- A session could be woken hours before its quota came back. The `Resets in
+  3h` countdown was dated from the last prompt sent in that folder, which can
+  be much older than the banner. It is now dated from when unsnooze reads the
+  banner, so a wake can be slightly late but not early (#40).
+
+### `unsnooze update`
+
+- With two npm installs on one machine (for example unsnooze under `~/.local`
+  and nvm's npm first on PATH), the update went into the other npm's folder
+  and the running copy never changed. The update now targets the folder the
+  running copy was installed into (#41).
+- It no longer prints "already up to date" when a newer version is known and
+  this copy did not change. It says what happened and exits with an error (#41).
 
 ## 1.19.4 — 2026-09-30
 
