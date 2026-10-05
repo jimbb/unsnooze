@@ -16,6 +16,7 @@ import { parseResetTime, resetAtMs } from './time-parser.js';
 import { upsertSession } from './state.js';
 import { latestRateLimitFromTranscript } from './watchers/claude.js';
 import { getMultiplexer } from './multiplexer.js';
+import { tmuxPaneFromEnv } from './multiplexers/tmux.js';
 import { spawnResumerIfNeeded, ensureDaemon } from './spawn.js';
 import { makeLogger } from './logger.js';
 import { addressHash } from './lease.js';
@@ -47,7 +48,7 @@ export function hookContext(env = process.env, payload = {}) {
   const pane = managedMux
     ? (env.UNSNOOZE_PANE || null)
     : (muxName === 'herdr' ? env.HERDR_PANE_ID
-      : muxName === 'zellij' ? env.ZELLIJ_PANE_ID : env.TMUX_PANE || payload.tmux_pane) || null;
+      : muxName === 'zellij' ? env.ZELLIJ_PANE_ID : tmuxPaneFromEnv(env) || payload.tmux_pane) || null;
   const paneOwner = muxName === 'herdr'
     ? (managedMux ? env.UNSNOOZE_PANE_OWNER : (env.HERDR_SESSION || 'default'))
     : muxName === 'zellij'

@@ -16,7 +16,9 @@ const DIR = mkdtempSync(join(tmpdir(), 'unsnooze-pane-id-'));
 process.env.UNSNOOZE_STATE_DIR = DIR;
 process.env.UNSNOOZE_NOTIFICATIONS = 'off';
 
-const { createTmux } = await import('../src/multiplexers/tmux.js');
+const { createTmux: createAnyTmux } = await import('../src/multiplexers/tmux.js');
+// Real tmux semantics on every host (native Windows would select psmux's).
+const createTmux = opts => createAnyTmux({ platform: 'linux', ...opts });
 const { paneOwnedByRecord, writeLease, removeLease } = await import('../src/lease.js');
 const { reap, autoReapIfEnabled } = await import('../src/reap.js');
 const { dispatchOne } = await import('../src/resumer.js');
@@ -57,7 +59,7 @@ test('stampPaneOwner sets the @unsnooze_owner pane option', async () => {
   const mux = createTmux({ spawner, env: {} });
   await mux.stampPaneOwner('%7', 'lease-abc');
   assert.deepEqual(spawner.calls.at(-1).args,
-    ['set-option', '-p', '-t', '%7', '@unsnooze_owner', 'lease-abc']);
+    ['set-option', '-t', '%7', '-p', '@unsnooze_owner', 'lease-abc']);
 });
 
 test('paneOwnerStamp reads the option back, blank/error → null', async () => {

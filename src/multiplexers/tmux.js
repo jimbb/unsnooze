@@ -6,9 +6,11 @@ import { resolveSessionName, SessionCreateError } from './session-name.js';
 
 const execFileAsync = promisify(execFileCb);
 
+// windowsHide: the console-less monitor polls through the async path every few
+// seconds (see workspace.js). The sync new-session needs the real console.
 function defaultSpawner(file, args, { sync = false, ...options } = {}) {
   if (sync) return spawnSync(file, args, options);
-  return execFileAsync(file, args, options).then(({ stdout }) => stdout);
+  return execFileAsync(file, args, { windowsHide: true, ...options }).then(({ stdout }) => stdout);
 }
 
 function envArgs(env = {}) {
@@ -51,8 +53,43 @@ const SESSION_START_ERROR_RE = new RegExp([
 
 export { SessionCreateError };
 
-export function createTmux({ spawner = defaultSpawner, env = process.env } = {}) {
+// tmux on native Windows is psmux, and three of its differences break revival
+// (verified against psmux 3.3.6, which reports itself as "tmux 3.3.6"):
+//  - Command words are joined with spaces and run through pwsh/cmd unless `--`
+//    precedes them, and only new-session honours `--` — new-window always goes
+//    through the shell. `C:\Program Files\nodejs\node.exe` then dies at
+//    "C:\Program" and the window closes before the agent ever starts.
+//  - Pane ids are per session: every session's first pane is %1, and a bare
+//    `-t %1` means whichever session is newest. `session:%1` is exact.
+//  - A target pane that is gone resolves to some other pane: send-keys exits 0
+//    and types into it, capture-pane reads it.
+// Real tmux accepts `--` and `session:%N` too, so an MSYS2 tmux is unharmed.
+
+// This pane's id as unsnooze addresses it: `session:%N` inside psmux, which
+// exports PSMUX_SESSION; the bare server-global %N under real tmux.
+export function tmuxPaneFromEnv(env = process.env) {
+  if (!env.TMUX_PANE) return null;
+  return env.PSMUX_SESSION ? `${env.PSMUX_SESSION}:${env.TMUX_PANE}` : env.TMUX_PANE;
+}
+
+export function createTmux({ spawner = defaultSpawner, env = process.env, platform = process.platform } = {}) {
   const run = (...args) => spawner('tmux', args);
+  const psmux = platform === 'win32';
+  const PANE_FMT = psmux ? '#{session_name}:#{pane_id}' : '#{pane_id}';
+  const RAW = psmux ? ['--'] : [];
+  // A pane-targeted command, refused for a pane that is gone — real tmux does
+  // that itself; psmux would run it against another pane.
+  const onPane = async (pane, cmd, ...args) => {
+    if (psmux && !(await backend.paneAlive(pane))) throw new Error(`can't find pane: ${pane}`);
+    return run(cmd, '-t', pane, ...args);
+  };
+  const sessionTaken = name => {
+    try {
+      return spawner('tmux', ['has-session', '-t', name], { sync: true, stdio: 'ignore', env }).status === 0;
+    } catch {
+      return false;
+    }
+  };
 
   const backend = {
     name: 'tmux',
@@ -69,33 +106,33 @@ export function createTmux({ spawner = defaultSpawner, env = process.env } = {})
     inside() { return !!env.TMUX; },
     currentPaneId() {
       if (env.UNSNOOZE_MUX === 'tmux' && env.UNSNOOZE_PANE) return env.UNSNOOZE_PANE;
-      return env.TMUX_PANE || null;
+      return tmuxPaneFromEnv(env);
     },
 
     async capturePane(pane, lines = 200) {
-      return run('capture-pane', '-t', pane, '-p', '-S', `-${lines}`);
+      return onPane(pane, 'capture-pane', '-p', '-S', `-${lines}`);
     },
 
     async capturePaneVisible(pane) {
-      return run('capture-pane', '-t', pane, '-p');
+      return onPane(pane, 'capture-pane', '-p');
     },
 
     async sendText(pane, text) {
-      await run('send-keys', '-t', pane, '-l', text);
+      await onPane(pane, 'send-keys', '-l', text);
       await new Promise(resolve => setTimeout(resolve, SUBMIT_DELAY_MS));
-      await run('send-keys', '-t', pane, 'Enter');
+      await onPane(pane, 'send-keys', 'Enter');
     },
 
     async sendKey(pane, key) {
-      await run('send-keys', '-t', pane, key);
+      await onPane(pane, 'send-keys', key);
     },
 
     async paneAlive(pane) {
       try {
         // tmux 3.7b prints a blank line and exits 0 for a nonexistent target,
-        // so the exit code alone is not evidence — the output must echo the
-        // pane id back.
-        const out = await run('display-message', '-t', pane, '-p', '#{pane_id}');
+        // and psmux names a different pane, so the exit code alone is not
+        // evidence — the output must echo the pane id back.
+        const out = await run('display-message', '-t', pane, '-p', PANE_FMT);
         return out.trim() === pane;
       } catch {
         return false;
@@ -106,7 +143,7 @@ export function createTmux({ spawner = defaultSpawner, env = process.env } = {})
     // code (same tmux 3.7b blank-success pitfall as paneAlive).
     async sessionForPane(pane) {
       try {
-        const out = (await run('display-message', '-t', pane, '-p', '#{session_name}')).trim();
+        const out = (await onPane(pane, 'display-message', '-p', '#{session_name}')).trim();
         return out || null;
       } catch {
         return null;
@@ -133,7 +170,7 @@ export function createTmux({ spawner = defaultSpawner, env = process.env } = {})
 
     async paneTty(pane) {
       try {
-        const out = (await run('display-message', '-t', pane, '-p', '#{pane_tty}')).trim();
+        const out = (await onPane(pane, 'display-message', '-p', '#{pane_tty}')).trim();
         return out || null;
       } catch {
         return null;
@@ -166,7 +203,7 @@ export function createTmux({ spawner = defaultSpawner, env = process.env } = {})
 
     async paneCurrentCommand(pane) {
       try {
-        return (await run('display-message', '-t', pane, '-p', '#{pane_current_command}')).trim();
+        return (await onPane(pane, 'display-message', '-p', '#{pane_current_command}')).trim();
       } catch {
         return null;
       }
@@ -178,7 +215,7 @@ export function createTmux({ spawner = defaultSpawner, env = process.env } = {})
     // older tmux fails quietly and callers fall back to lease checks.
     async stampPaneOwner(pane, leaseId) {
       try {
-        await run('set-option', '-p', '-t', pane, '@unsnooze_owner', String(leaseId));
+        await onPane(pane, 'set-option', '-p', '@unsnooze_owner', String(leaseId));
         return true;
       } catch {
         return false;
@@ -189,7 +226,7 @@ export function createTmux({ spawner = defaultSpawner, env = process.env } = {})
     // both null — trust stdout, not the exit code (tmux 3.7b blank-success).
     async paneOwnerStamp(pane) {
       try {
-        const out = (await run('display-message', '-t', pane, '-p', '#{@unsnooze_owner}')).trim();
+        const out = (await onPane(pane, 'display-message', '-p', '#{@unsnooze_owner}')).trim();
         return out || null;
       } catch {
         return null;
@@ -217,7 +254,7 @@ export function createTmux({ spawner = defaultSpawner, env = process.env } = {})
 
     async listSessionPanes(sessionName) {
       try {
-        const out = await run('list-panes', '-t', sessionName, '-F', '#{pane_id}');
+        const out = await run('list-panes', '-t', sessionName, '-F', PANE_FMT);
         return out.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
       } catch {
         return [];
@@ -235,7 +272,15 @@ export function createTmux({ spawner = defaultSpawner, env = process.env } = {})
     async newWindow(sessionName, cwd, launchSpec) {
       // Environment flags require tmux >= 3.0 for new-window and >= 3.2 for
       // new-session. Older tmux fails revival with an "unknown flag -e" error.
-      const launch = [...envArgs(launchSpec.env), launchSpec.file, ...(launchSpec.args || [])];
+      const launch = [...envArgs(launchSpec.env), ...RAW, launchSpec.file, ...(launchSpec.args || [])];
+      // psmux: new-window would run the command through a shell, so each
+      // revival opens its own session — resumer and prompt-queue persist it.
+      if (psmux) {
+        const session = resolveSessionName(sessionName, sessionTaken);
+        const pane = await run('new-session', '-d', '-s', session, '-c', cwd,
+          '-P', '-F', PANE_FMT, ...launch);
+        return { pane: pane.trim(), paneOwner: null, session };
+      }
       let pane;
       if (!(await backend.sessionExists(sessionName))) {
         pane = await run('new-session', '-d', '-s', sessionName, '-c', cwd,
@@ -254,20 +299,13 @@ export function createTmux({ spawner = defaultSpawner, env = process.env } = {})
       // tmux in the foreground also gives Ctrl-C to the active pane directly.
       // Its -e environment flags require tmux >= 3.2; older versions fail
       // revival with an "unknown flag -e" error.
-      const name = resolveSessionName(wrappedSessionName(env), candidate => {
-        try {
-          return spawner('tmux', ['has-session', '-t', candidate],
-            { sync: true, stdio: 'ignore', env }).status === 0;
-        } catch {
-          return false;
-        }
-      });
+      const name = resolveSessionName(wrappedSessionName(env), sessionTaken);
       launchSpec.onSessionCreated?.(name);
       // Session name is discovered live via sessionForPane at record-write
       // time — do NOT inject UNSNOOZE_SESSION_NAME (would leak into daemons
       // spawned from the agent via {...process.env}).
       const args = ['new-session', '-s', name,
-        ...envArgs(launchSpec.env), launchSpec.file, ...(launchSpec.args || [])];
+        ...envArgs(launchSpec.env), ...RAW, launchSpec.file, ...(launchSpec.args || [])];
       // stderr is piped, not inherited: the tmux client draws its UI on the
       // stdin/stdout tty; stderr carries only tmux's own error messages, and
       // capturing them is how a session-start failure is told apart from the

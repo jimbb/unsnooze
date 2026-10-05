@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.19.5 — 2026-10-04
+
+Sessions resume again under psmux, the tmux port for native Windows.
+
+- Every Claude revival in psmux failed five times with `ready timeout`. psmux
+  ran the launch command through a shell, so the space in
+  `C:\Program Files\nodejs\node.exe` closed the window before Claude started.
+  Each revival now opens its own psmux session with its arguments passed
+  through as-is, which also keeps a Codex resume message in one piece (#43).
+- A resume message can no longer be typed into an unrelated window. psmux
+  sends keys for a pane that has closed to some other pane, and every psmux
+  session numbers its first pane `%1`. unsnooze now addresses panes as
+  `session:%N` and checks the pane still exists before reading or typing (#43).
+
 ## 1.19.4 — 2026-09-30
 
 Antigravity's new quota banner, and a shorter README.
