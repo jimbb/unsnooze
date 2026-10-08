@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.20.0 — 2026-10-08
+
+Window priming starts your 5-hour window before you sit down, and `doctor`
+stops flagging a Claude hook you don't need.
 
 ### Window priming (experimental)
 
@@ -21,6 +24,12 @@
 - A prime that fails (say, the network is not back yet after waking) retries
   up to three times, five minutes apart, and notifies once.
 - A prime that hits a limit is never treated as a session to revive.
+
+### `unsnooze doctor`
+
+- No longer reports a missing Claude StopFailure hook when Claude is disabled.
+  `unsnooze install --yes` skips that hook for a disabled Claude, so the
+  finding could never be cleared (#44).
 
 ## 1.19.5 — 2026-10-05
 
