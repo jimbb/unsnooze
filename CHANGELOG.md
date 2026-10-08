@@ -9,6 +9,10 @@
   daemon send one tiny Haiku prompt at 6am, so the window resets at 11am and a
   fresh one lands mid-morning. Codex works the same on plans with a 5-hour
   window (`primeAt.codex`).
+- `primeAt.claude auto` works out the time for you: it learns when you usually
+  start from the last 3 weeks of your own prompts (ignoring tool results,
+  subagents, revivals and late nights running past midnight) and primes 3 hours
+  before. It waits for 5 days of history and re-learns daily.
 - Every prime checks the reset time in the reply and reports whether it
   started the window, found one already running, or found no 5-hour window on
   the plan. `unsnooze prime` shows the schedule and last result;

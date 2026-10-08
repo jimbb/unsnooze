@@ -58,7 +58,8 @@ export const DEFAULTS = {
   // that runs out of context is the one the user started.
   launchExtraArgs: { claude: '', codex: '', grok: '', qwen: '', kimi: '', opencode: '', agy: '', cursor: '' },
   // Window priming (experimental, see prime.js): one tiny prompt at primeAt
-  // (local HH:MM) starts the 5-hour window early. '' = off.
+  // (local HH:MM, or auto = learned from history) starts the 5-hour window
+  // early. '' = off.
   primeAt: { claude: '', codex: '' },
   primeModel: { claude: '', codex: '' },   // '' = claude haiku / codex's cheapest cached model
   primeDays: 'daily',                      // daily | weekdays
@@ -268,8 +269,9 @@ export function setConfigValue(key, rawValue) {
       // Inline, not imported from prime.js: that module pulls in usage.js,
       // and settings.js must stay a cheap leaf for the hook path.
       const m = value.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
-      if (!m && !/^(off)?$/i.test(value.trim())) throw new Error(`unsnooze: "${key}" needs a local time like 06:00, or off`);
-      value = m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+      const auto = /^auto$/i.test(value.trim());
+      if (!m && !auto && !/^(off)?$/i.test(value.trim())) throw new Error(`unsnooze: "${key}" needs auto, a local time like 06:00, or off`);
+      value = auto ? 'auto' : m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
     }
     if (ENUMS[key] && !ENUMS[key].includes(value)) {
       throw new Error(`unsnooze: "${key}" must be one of: ${ENUMS[key].join(', ')}`);

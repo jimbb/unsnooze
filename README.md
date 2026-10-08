@@ -129,9 +129,10 @@ you would, resumes once, and checks the limit actually lifted. It replaces the
 4am alarm, not the limit.
 
 **Can it start my 5-hour window before I sit down?** Yes, experimentally:
-`unsnooze config set primeAt.claude 06:00` has the daemon send one tiny Haiku
-prompt at 6am, so the window resets at 11am instead of mid-afternoon. Claude and
-Codex only. See [window priming](https://unsnooze.dev/docs/commands/#prime).
+`unsnooze config set primeAt.claude auto` learns when you usually start and has
+the daemon send one tiny Haiku prompt 3 hours earlier, so the window resets
+mid-session instead of 5 hours in. A fixed time like `06:00` works too. Claude
+and Codex only. See [window priming](https://unsnooze.dev/docs/commands/#prime).
 
 More questions and troubleshooting: [unsnooze.dev/docs/troubleshooting](https://unsnooze.dev/docs/troubleshooting/).
 

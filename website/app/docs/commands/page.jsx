@@ -172,11 +172,20 @@ $ unsnooze usage --uninstall-statusline  # restore your original statusLine`}</S
                 clock. Start work at 9am and it resets at 2pm. Have unsnooze send one tiny prompt
                 to the cheapest model at 6am and the window resets at 11am instead — a fresh one
                 lands mid-morning.</p>
-              <Shell title="window priming">{`$ unsnooze config set primeAt.claude 06:00   # local time; off to stop
+              <Shell title="window priming">{`$ unsnooze config set primeAt.claude auto     # learn when you start; or a time like 06:00
 $ unsnooze config set primeDays weekdays      # optional (default: daily)
 $ unsnooze prime                              # schedule + last result
+  claude  auto — you usually start ~12:10 (17 days), so it primes at 09:10 daily, model haiku
 $ unsnooze prime now claude                   # prime right away
-unsnooze: claude 5-hour window started — resets 11:00 am`}</Shell>
+unsnooze: claude 5-hour window started — resets 2:10 pm`}</Shell>
+              <p><C>auto</C> learns when you usually start from your own local history: the
+                median of each day's first prompt after 5 hours of quiet, over the last 3 weeks,
+                and primes 3 hours before it — so the reset lands about 2 hours into your
+                session. Only your own prompts count; tool results, subagents, unsnooze's resume
+                messages and primes don't, so a 4am revival never teaches it you start at 4am.
+                It needs 5 qualifying days before it primes, and re-learns daily. Usage on
+                claude.ai or the desktop app isn't in local history; if that already started
+                the window, the prime reports it as running.</p>
               <p>Scheduled primes run from the daemon (<C>unsnooze install --daemon</C>). A machine
                 asleep at the scheduled time primes on wake, up to 4 hours late; after that the
                 day is skipped. Each prime checks itself — the reply carries the window's reset

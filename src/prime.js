@@ -1,7 +1,8 @@
 // Window priming (experimental). Claude's 5-hour window — and Codex's, on
 // plans that have one — starts on the first message after a reset, not on a
-// clock. One tiny prompt to the cheapest model at a chosen time (primeAt.<id>)
-// starts it early, so the reset lands mid-workday instead of mid-afternoon.
+// clock. One tiny prompt to the cheapest model at a chosen time (primeAt.<id>,
+// or `auto` — learned from history, see prime-learn.js) starts it early, so
+// the reset lands mid-workday instead of mid-afternoon.
 //
 // Only claude and codex: Cursor and Grok reset on a fixed billing clock,
 // Qwen's 5h quota slides per request (and its terms forbid scheduled
@@ -20,6 +21,7 @@ import { getAgent } from './agents/index.js';
 import { updateState, readState } from './state.js';
 import { extractCodexUsage } from './usage.js';
 import { makeLogger } from './logger.js';
+import { learnSlot, MIN_DAYS } from './prime-learn.js';
 
 const log = makeLogger('prime');
 
@@ -34,10 +36,11 @@ const STARTED_SLACK_MS = 10 * 60_000;
 export const GRACE_MS = 4 * 3_600_000;
 const RUN_TIMEOUT_MS = 3 * 60_000;
 
-// "6:00" / "06:00" → "06:00"; "" / "off" → ""; anything else → null.
+// "6:00" / "06:00" → "06:00"; "auto"; "" / "off" → ""; anything else → null.
 export function normalizePrimeAt(raw) {
   const value = String(raw ?? '').trim();
   if (value === '' || /^off$/i.test(value)) return '';
+  if (/^auto$/i.test(value)) return 'auto';
   const m = value.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
   return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null;
 }
@@ -50,7 +53,7 @@ export function dayKey(ms) {
 // Is a prime due now? Local time, once per day, within GRACE_MS of the slot.
 export function primeDue({ at, days = 'daily', lastDay = null, now = Date.now() }) {
   const hhmm = normalizePrimeAt(at);
-  if (!hhmm) return false;
+  if (!hhmm || hhmm === 'auto') return false;   // auto resolves to a slot first
   const d = new Date(now);
   if (days === 'weekdays' && (d.getDay() === 0 || d.getDay() === 6)) return false;
   const [h, m] = hhmm.split(':').map(Number);
@@ -202,24 +205,53 @@ const PRIME_TITLES = {
 function record(result) {
   updateState(state => {
     state.prime = state.prime && typeof state.prime === 'object' ? state.prime : {};
-    state.prime[result.agent] = { ...result, day: dayKey(result.at) };
+    state.prime[result.agent] = { learned: state.prime[result.agent]?.learned, ...result, day: dayKey(result.at) };
   });
 }
 
+// The slot to prime at today: the fixed time, or for auto the learned one —
+// re-learned once a day and kept in state, so ticks in between cost nothing.
+async function resolveSlot(id, { now, days, last, learn }) {
+  const at = normalizePrimeAt(getConfig(`primeAt.${id}`));
+  if (at !== 'auto') return at;
+  const known = last[id]?.learned;
+  if (known?.day === dayKey(now) && known.primeDays === days) return known.slot;
+  const learned = { ...(await learn(id, { days, now })), day: dayKey(now), primeDays: days };
+  updateState(state => {
+    state.prime = state.prime && typeof state.prime === 'object' ? state.prime : {};
+    state.prime[id] = { ...(state.prime[id] || { agent: id }), learned };
+  });
+  log(learned.slot
+    ? `${id}: usually starts ~${learned.start} (${learned.days} days) — priming at ${learned.slot}`
+    : `${id}: auto priming still learning (${learned.days} of ${MIN_DAYS} days)`);
+  return learned.slot;
+}
+
+let ticking = false;
+
 // Daemon tick. The day is claimed before the run starts, so the next tick
 // (or a second daemon) cannot fire the same prime while this one is out.
-export async function tickPrime({ now = Date.now(), run = runPrime, notifyFn = null } = {}) {
+export async function tickPrime({ now = Date.now(), run = runPrime, notifyFn = null, learn = learnSlot } = {}) {
   const on = PRIME_AGENTS.filter(id => getConfig(`agents.${id}`) && normalizePrimeAt(getConfig(`primeAt.${id}`)));
-  if (!on.length) return [];   // the common case: priming off, no state read
+  if (!on.length || ticking) return [];   // the common case: priming off, no state read
+  ticking = true;
+  try { return await tickOn(on, { now, run, notifyFn, learn }); } finally { ticking = false; }
+}
+
+async function tickOn(on, { now, run, notifyFn, learn }) {
   const days = getConfig('primeDays');
   const last = readState().prime || {};
-  const due = on.filter(id => primeDue({ at: getConfig(`primeAt.${id}`), days, lastDay: last[id]?.day, now }));
+  const due = [];
+  for (const id of on) {
+    const slot = await resolveSlot(id, { now, days, last, learn });
+    if (primeDue({ at: slot, days, lastDay: last[id]?.day, now })) due.push(id);
+  }
   if (!due.length) return [];
   let claimed = [];
   updateState(state => {
     state.prime = state.prime && typeof state.prime === 'object' ? state.prime : {};
     claimed = due.filter(id => state.prime[id]?.day !== dayKey(now));
-    for (const id of claimed) state.prime[id] = { agent: id, at: now, day: dayKey(now), outcome: 'pending' };
+    for (const id of claimed) state.prime[id] = { learned: state.prime[id]?.learned, agent: id, at: now, day: dayKey(now), outcome: 'pending' };
   });
   const notify = notifyFn || (await import('./notify.js')).notify;
   const results = [];
@@ -235,7 +267,7 @@ export async function tickPrime({ now = Date.now(), run = runPrime, notifyFn = n
 }
 
 // `unsnooze prime` — schedule + last result; `unsnooze prime now [agent…]`.
-export async function cmdPrime(rest = [], { run = runPrime, print = console.log } = {}) {
+export async function cmdPrime(rest = [], { run = runPrime, print = console.log, learn = learnSlot } = {}) {
   if (rest[0] === 'now') {
     const ids = rest.slice(1).length ? rest.slice(1) : PRIME_AGENTS.filter(id => getConfig(`agents.${id}`));
     const bad = ids.filter(id => !PRIME_AGENTS.includes(id));
@@ -261,9 +293,15 @@ export async function cmdPrime(rest = [], { run = runPrime, print = console.log 
   const last = readState().prime || {};
   print('window priming (experimental) — starts the 5-hour window early with one tiny prompt');
   for (const id of PRIME_AGENTS) {
-    const at = getConfig(`primeAt.${id}`);
-    const sched = normalizePrimeAt(at) ? `${normalizePrimeAt(at)} ${days}, model ${primeModel(id) || 'default'}` : 'off';
-    const prev = last[id] ? `  last: ${dayKey(last[id].at)} ${hm(last[id].at)} — ${formatPrimeResult(last[id])}` : '';
+    const at = normalizePrimeAt(getConfig(`primeAt.${id}`));
+    let sched = 'off';
+    if (at === 'auto') {
+      const l = await learn(id, { days });
+      sched = l.slot
+        ? `auto — you usually start ~${l.start} (${l.days} days), so it primes at ${l.slot} ${days}, model ${primeModel(id) || 'default'}`
+        : `auto — still learning when you start (${l.days} of ${MIN_DAYS} days); no primes until then`;
+    } else if (at) sched = `${at} ${days}, model ${primeModel(id) || 'default'}`;
+    const prev = last[id]?.at ? `  last: ${dayKey(last[id].at)} ${hm(last[id].at)} — ${formatPrimeResult(last[id])}` : '';
     print(`  ${id.padEnd(7)} ${sched}${prev ? `\n  ${prev}` : ''}`);
   }
   if (PRIME_AGENTS.some(id => normalizePrimeAt(getConfig(`primeAt.${id}`)))) {
@@ -272,7 +310,7 @@ export async function cmdPrime(rest = [], { run = runPrime, print = console.log 
       print('\n  ! scheduled primes run from the daemon, which is not installed: unsnooze install --daemon');
     }
   } else {
-    print('\n  turn on: unsnooze config set primeAt.claude 06:00');
+    print('\n  turn on: unsnooze config set primeAt.claude auto   (or a time like 06:00)');
   }
   return 0;
 }
