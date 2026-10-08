@@ -18,10 +18,15 @@ const STARS = Array.from({ length: 120 }, (_, i) => {
   };
 });
 
-// `dim` is the quieter sky behind the subpages' reading surfaces.
+// `dim` is the quieter sky behind the subpages' reading surfaces. The spans are
+// the server-rendered sky; StarsGL swaps in the WebGL one after hydration
+// where it can, and they stay the sky everywhere it can't.
+import StarsGL from './StarsGL.jsx';
+
 export default function Stars({ dim = false }) {
   return (
     <div className={dim ? 'stars stars--dim' : 'stars'} id="stars" aria-hidden="true">
+      <StarsGL dim={dim} />
       {STARS.map((s, i) => (
         <span
           key={i}

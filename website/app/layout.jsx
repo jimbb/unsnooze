@@ -2,6 +2,7 @@ import './globals.css';
 import { Schibsted_Grotesk, Inter, JetBrains_Mono } from 'next/font/google';
 import { SITE_URL } from '../lib/site.js';
 import CursorFx from '../components/CursorFx.jsx';
+import Spotlight from '../components/Spotlight.jsx';
 
 // Display: Schibsted Grotesk 800 (700 for secondary heads). Body: Inter.
 // Mono: JetBrains Mono. Exposed as CSS variables; globals.css builds the
@@ -67,6 +68,7 @@ export default function RootLayout({ children }) {
         <a className="skip" href="#main">Skip to content</a>
         {children}
         <CursorFx />
+        <Spotlight />
       </body>
     </html>
   );

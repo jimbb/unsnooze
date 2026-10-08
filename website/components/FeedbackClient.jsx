@@ -141,7 +141,7 @@ function Board({ rows, error }) {
       </div>
       {visible.length === 0 && <p className="fb-note">Nothing here yet — yours could be first.</p>}
       {visible.map((r) => (
-        <article className="fb-row" key={r.id}>
+        <article className="fb-row spot" key={r.id}>
           <div className="fb-row-head">
             <span className={`fb-badge ${r.kind}`}>{r.kind}</span>
             <h3>{r.title}</h3>

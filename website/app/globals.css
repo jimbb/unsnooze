@@ -88,6 +88,9 @@ p a:hover { color: var(--accent); }
 .stars { position: fixed; inset: -20vh 0 -20vh 0; pointer-events: none; z-index: 0; will-change: transform, opacity; }
 .stars span { position: absolute; border-radius: 50%; background: var(--star); animation: twinkle 4.5s ease-in-out infinite; }
 .stars span.bright { animation-name: twinkle-bright; }
+.stars__gl { position: absolute; inset: 0; }
+.stars__gl canvas { display: block; width: 100%; height: 100%; }
+.stars--gl > span { display: none; }
 @keyframes twinkle { 0%, 100% { opacity: .12; } 50% { opacity: .62; } }
 @keyframes twinkle-bright {
   0%, 100% { opacity: .2; transform: scale(1); }
@@ -305,6 +308,8 @@ section.poster { padding: var(--space-4xl) 0 0; }
 .led { width: 6px; height: 6px; border-radius: 50%; background: var(--awake); box-shadow: 0 0 10px var(--awake); animation: pulse 2s var(--ease-in-out) infinite; }
 .led.hot { background: var(--coral); box-shadow: 0 0 10px var(--coral); }
 .colon { animation: blink 1s steps(1) infinite; }
+.flap-clock { display: inline-flex; }
+.flap-clock .split-flap-text { font-family: var(--font-mono); font-weight: 600; letter-spacing: 0; }
 
 /* ── cinema band ──────────────────────────────────────── */
 .cinema { position: relative; z-index: 2; margin-top: var(--space-3xl); }
@@ -340,6 +345,7 @@ section.poster { padding: var(--space-4xl) 0 0; }
 .credits { position: relative; z-index: 2; overflow: hidden; border-bottom: 1px solid var(--rule-soft); padding: 16px 0; mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
 .credits__track { display: flex; width: max-content; animation: crawl 48s linear infinite; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ink-3); }
 .credits__track span { padding: 0 20px; white-space: nowrap; }
+.credits:hover .credits__track { animation-play-state: paused; }
 .credits__track span::after { content: "❯"; color: var(--accent); margin-left: 40px; opacity: .6; }
 @keyframes crawl { to { transform: translateX(-50%); } }
 
@@ -773,3 +779,23 @@ html.fx-caret input, html.fx-caret textarea, html.fx-caret select { cursor: auto
   .fb-form { padding: var(--space-lg) var(--space-md); }
 }
 .sub-foot .foot { max-width: 76rem; }
+
+/* 404 backdrop (GlitchSky) */
+.glitch-sky { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .32; }
+.glitch-sky__veil {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 70% 60% at 28% 38%, var(--paper) 15%, transparent 75%),
+    linear-gradient(to bottom, transparent 55%, var(--paper));
+}
+
+/* Hover spotlight (Spotlight.jsx) */
+.spot { position: relative; isolation: isolate; }
+.spot::before {
+  content: ""; position: absolute; inset: 0 calc(-1 * var(--space-md)); z-index: -1;
+  border-radius: var(--radius-md); pointer-events: none; opacity: 0; transition: opacity 400ms var(--ease-out);
+  background: radial-gradient(420px circle at calc(var(--mx, 50%) + var(--space-md)) var(--my, 50%),
+    color-mix(in oklch, var(--accent) 10%, transparent), transparent 70%);
+}
+.spot:hover::before { opacity: 1; }
+@media (hover: none) { .spot::before { display: none; } }

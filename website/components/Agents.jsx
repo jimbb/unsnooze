@@ -78,7 +78,7 @@ export default function Agents() {
 
       <div className="roster">
         {CORE.map((c) => (
-          <div className="roster__row rv" key={c.name}>
+          <div className="roster__row rv spot" key={c.name}>
             <h3 className="roster__name">{c.name} <span className="tag">{c.tag}</span></h3>
             <p>{c.body}</p>
           </div>
@@ -94,7 +94,7 @@ export default function Agents() {
         </div>
         <div className="exp__rows">
           {EXPERIMENTAL.map((e) => (
-            <div className="exp__row" key={e.cmd}>
+            <div className="exp__row spot" key={e.cmd}>
               <code>{e.cmd}</code>
               <span>{e.desc}</span>
             </div>

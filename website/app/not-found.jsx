@@ -1,4 +1,5 @@
 import Stars from '../components/Stars.jsx';
+import GlitchSky from '../components/GlitchSky.jsx';
 import SiteNav from '../components/SiteNav.jsx';
 import SubFooter from '../components/SubFooter.jsx';
 
@@ -11,6 +12,7 @@ export default function NotFound() {
   return (
     <div className="subpage">
       <Stars dim />
+      <GlitchSky />
       <SiteNav page="404" />
       <main className="wrap subpage-main" id="main">
         <header className="sub-hero">

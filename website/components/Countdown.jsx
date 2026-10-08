@@ -1,12 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import SplitFlapText from './rb/SplitFlapText.jsx';
 
 const pad = (n) => String(n).padStart(2, '0');
 
 // Live countdown to the next 03:00 local — the reset the whole page is
-// waiting for. Renders a placeholder on the server (the time is the
+// waiting for — on a split-flap board: each second flips only the digits
+// that changed. Renders a placeholder on the server (the time is the
 // visitor's, not the build machine's) and starts ticking after hydration.
+// The flaps are decoration; assistive tech reads the label.
 export default function Countdown() {
   const [s, setS] = useState(null);
   useEffect(() => {
@@ -22,10 +25,15 @@ export default function Countdown() {
   }, []);
 
   if (s === null) return <span className="strip__v warm">--:--:--</span>;
-  const colon = <span className="colon">:</span>;
+  const text = `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
   return (
-    <span className="strip__v warm">
-      {pad(Math.floor(s / 3600))}{colon}{pad(Math.floor(s / 60) % 60)}{colon}{pad(s % 60)}
+    <span className="strip__v warm flap-clock" role="timer" aria-label={`${text} until 03:00`}>
+      <SplitFlapText
+        text={text} loop={false} padTo={8} charset="numeric"
+        flipsPerChar={3} flipDuration={0.07} stagger={0.03}
+        fontSize="1em" tileColor="#171b30" textColor="currentColor" tileRadius={4} gap={3}
+        aria-hidden="true"
+      />
     </span>
   );
 }
