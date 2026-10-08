@@ -194,12 +194,27 @@ test('runDoctor flags missing hook / wrappers / multiplexer as health problems',
     mux: { name: 'tmux', available: () => false },
     hookInstalled: () => false,
     wrappersInstalled: () => false,
+    enabled: () => true,
   });
   const ids = report.findings.filter(f => f.kind === 'health').map(f => f.id);
   assert.ok(ids.includes('hook-missing'));
   assert.ok(ids.includes('wrappers-missing'));
   assert.ok(ids.includes('mux-missing'));
   assert.equal(report.healthy, false);
+});
+
+// #44: install skips the claude hook when claude is disabled, so doctor must
+// not demand it — `install --yes` could never clear the finding.
+test('runDoctor: no hook-missing when claude is disabled', async () => {
+  const report = await runDoctor({
+    runner: () => ({ status: 0, stdout: '' }),
+    launchAgentsDir: join(DIR, 'nope'),
+    csgStateDir: join(DIR, 'nope'),
+    csgBinPath: null,
+    hookInstalled: () => false,
+    enabled: id => id !== 'claude',
+  });
+  assert.ok(!report.findings.some(f => f.id === 'hook-missing'));
 });
 
 // --- fixes ----------------------------------------------------------------------

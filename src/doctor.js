@@ -238,7 +238,9 @@ export async function runDoctor({
     });
   }
 
-  if (!hookInstalled()) {
+  // install only writes the hook for an enabled claude, so a codex-only
+  // setup must not be told to run an install that can never clear this.
+  if (enabled('claude') && !hookInstalled()) {
     findings.push({
       id: 'hook-missing', kind: 'health',
       title: 'Claude StopFailure hook is not installed',
