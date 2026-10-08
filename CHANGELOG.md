@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.20.1 — 2026-10-08
+
+`unsnooze help` lists the usage flags in the right place again, and the docs'
+new copy buttons only ever copy commands that run.
+
+### `unsnooze help`
+
+- The 1.20.0 `prime` entry landed between `unsnooze usage` and its own
+  `--install-statusline` / `--uninstall-statusline` lines, so those flags read
+  as if they belonged to `prime`. They are back under `usage`.
+
+### Website
+
+- Every command block in the docs has a copy button. It copies only commands
+  that run as written: syntax placeholders such as `<id>` and sample values
+  such as a made-up session id or host are shown but never copied, so a
+  pasted `hosts add` can no longer register a fake host. A new test checks
+  every copied command against the CLI.
+- A WebGL star field, a split-flap countdown to the reset and a new 404 page.
+
 ## 1.20.0 — 2026-10-08
 
 Window priming starts your 5-hour window before you sit down, and `doctor`
