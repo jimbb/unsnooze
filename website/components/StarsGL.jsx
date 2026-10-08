@@ -29,7 +29,7 @@ export default function StarsGL({ dim = false }) {
       transparent saturation={0} hueShift={220}
       density={dim ? 0.7 : 1} glowIntensity={dim ? 0.12 : 0.18}
       twinkleIntensity={0.45} rotationSpeed={0.02} starSpeed={0.15} speed={0.5}
-      mouseRepulsion repulsionStrength={1.2}
+      mouseRepulsion repulsionStrength={0.3}
     />
   );
 }

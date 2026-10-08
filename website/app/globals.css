@@ -662,6 +662,7 @@ html.fx-caret input, html.fx-caret textarea, html.fx-caret select { cursor: auto
 /* terminal blocks: a caption bar and the output — no window dots */
 .shell { margin: var(--space-lg) 0; border: 1px solid var(--rule); border-radius: var(--radius-sm); background: oklch(10.5% 0.022 272); overflow: hidden; }
 .shell figcaption {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 8px 14px; border-bottom: 1px solid var(--rule-soft);
   font-family: var(--font-mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
 }
@@ -799,3 +800,16 @@ html.fx-caret input, html.fx-caret textarea, html.fx-caret select { cursor: auto
 }
 .spot:hover::before { opacity: 1; }
 @media (hover: none) { .spot::before { display: none; } }
+
+/* Docs shell copy key (CopyButton) — the install pill's flip, caption-sized. */
+.shell-copy {
+  position: relative; overflow: hidden; flex: none; cursor: pointer;
+  font: 500 .65rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-2); background: transparent; border: 1px solid var(--rule); border-radius: var(--radius-pill);
+  padding: 4px 10px; transition: color var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
+}
+.shell-copy:hover, .shell-copy:focus-visible { color: var(--ink); border-color: var(--ink-3); }
+.shell-copy .w { display: inline-block; transition: transform var(--dur-base) var(--ease-out), opacity var(--dur-base) var(--ease-out); }
+.shell-copy .w2 { position: absolute; inset: 0; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); transform: translateY(100%); transition: transform var(--dur-base) var(--ease-rise); }
+.shell-copy.copied .w { transform: translateY(-120%); opacity: 0; }
+.shell-copy.copied .w2 { transform: none; }
