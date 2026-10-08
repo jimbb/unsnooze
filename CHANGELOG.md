@@ -18,6 +18,8 @@
   the plan. `unsnooze prime` shows the schedule and last result;
   `unsnooze prime now` runs one immediately. `primeDays weekdays` skips
   weekends.
+- A prime that fails (say, the network is not back yet after waking) retries
+  up to three times, five minutes apart, and notifies once.
 - A prime that hits a limit is never treated as a session to revive.
 
 ## 1.19.5 — 2026-10-05

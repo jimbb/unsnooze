@@ -22,6 +22,7 @@ import { updateState, readState } from './state.js';
 import { extractCodexUsage } from './usage.js';
 import { makeLogger } from './logger.js';
 import { learnSlot, MIN_DAYS } from './prime-learn.js';
+import { standaloneEnv } from './spawn.js';
 
 const log = makeLogger('prime');
 
@@ -50,16 +51,28 @@ export function dayKey(ms) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// Is a prime due now? Local time, once per day, within GRACE_MS of the slot.
-export function primeDue({ at, days = 'daily', lastDay = null, now = Date.now() }) {
+// The day a prime is due for right now, as a dayKey, else null. The slot is
+// local time, open for GRACE_MS — yesterday's slot too, so a machine asleep
+// across midnight still primes on wake. `wrap` marks a slot that falls the
+// evening before the day it serves (auto, for a start before 03:00): the
+// weekday check and the once-a-day key belong to that next day.
+export function dueDay({ at, days = 'daily', lastDay = null, now = Date.now(), wrap = false }) {
   const hhmm = normalizePrimeAt(at);
-  if (!hhmm || hhmm === 'auto') return false;   // auto resolves to a slot first
-  const d = new Date(now);
-  if (days === 'weekdays' && (d.getDay() === 0 || d.getDay() === 6)) return false;
+  if (!hhmm || hhmm === 'auto') return null;   // auto resolves to a slot first
   const [h, m] = hhmm.split(':').map(Number);
-  const slot = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m).getTime();
-  return now >= slot && now - slot <= GRACE_MS && lastDay !== dayKey(now);
+  const d = new Date(now);
+  for (const back of [0, 1]) {
+    const slot = new Date(d.getFullYear(), d.getMonth(), d.getDate() - back, h, m);
+    if (now < slot.getTime() || now - slot.getTime() > GRACE_MS) continue;
+    const served = new Date(slot.getFullYear(), slot.getMonth(), slot.getDate() + (wrap ? 1 : 0));
+    if (days === 'weekdays' && (served.getDay() === 0 || served.getDay() === 6)) continue;
+    const key = dayKey(served.getTime());
+    if (key !== lastDay) return key;
+  }
+  return null;
 }
+
+export const primeDue = opts => dueDay(opts) !== null;
 
 // Codex model slugs vary by account, so the default is the first "luna" or
 // "mini" model this install has cached, else codex's own default.
@@ -93,16 +106,20 @@ function jsonLines(text) {
   return String(text || '').split('\n').map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 }
 
-// Claude: the rate_limit_event in the stream-json output.
+// Claude: the rate_limit_events in the stream-json output. Any one of them
+// may describe another bucket (weekly, overage), so "no 5-hour window" is
+// only the answer when none of them carries one.
 export function parseClaudePrime(stdout) {
+  let seen = false;
   for (const m of jsonLines(stdout)) {
     if (m.type !== 'rate_limit_event') continue;
+    seen = true;
     const info = m.rate_limit_info || {};
     const five = info.unifiedWindows?.five_hour?.resetsAt
       ?? (info.rateLimitType === 'five_hour' ? info.resetsAt : null);
-    return Number.isFinite(five) ? { resetsAtMs: five * 1000 } : { noWindow: true };
+    if (Number.isFinite(five)) return { resetsAtMs: five * 1000 };
   }
-  return null;
+  return seen ? { noWindow: true } : null;
 }
 
 // Newest-first day dirs under sessions/YYYY/MM/DD — a prime's rollout is in
@@ -137,23 +154,41 @@ export function parseCodexPrime(stdout, { codexDir = CODEX_DIR } = {}) {
 
 // stdin closed: `codex exec` with a piped stdin reads it as extra prompt
 // input and exits with no output at all.
+// Resolves on `exit`, not only `close`: a grandchild holding the pipes open
+// must not leave the prime — and with it every later tick — waiting forever.
 function defaultRunner(bin, args, opts) {
   return new Promise(resolve => {
     let stdout = '';
     let stderr = '';
     let child;
+    let done = false;
+    const timers = [];
+    const finish = result => {
+      if (done) return;
+      done = true;
+      timers.forEach(clearTimeout);
+      resolve({ stdout, stderr, ...result });
+    };
     try {
-      child = spawn(bin, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
-    } catch (err) { resolve({ err, stdout, stderr }); return; }
-    const timer = setTimeout(() => { child.kill(); }, RUN_TIMEOUT_MS);
+      child = spawn(bin, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    } catch (err) { finish({ err }); return; }
+    timers.push(setTimeout(() => {
+      child.kill();
+      // An agent that ignores SIGTERM still has to give the tick back.
+      timers.push(setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* gone */ }
+        finish({ err: Object.assign(new Error('timed out'), { killed: true }) });
+      }, 5_000));
+    }, RUN_TIMEOUT_MS));
     child.stdout.on('data', d => { stdout += d; });
     child.stderr.on('data', d => { stderr += d; });
-    child.on('error', err => { clearTimeout(timer); resolve({ err, stdout, stderr }); });
-    child.on('close', (code, signal) => {
-      clearTimeout(timer);
-      const err = code === 0 ? null : Object.assign(new Error(`exit ${code ?? signal}`), { killed: !!signal });
-      resolve({ err, stdout, stderr });
+    child.on('error', err => finish({ err }));
+    const settle = (code, signal) => finish({
+      err: code === 0 ? null : Object.assign(new Error(`exit ${code ?? signal}`), { killed: !!signal }),
     });
+    // close = all output read; exit + a short drain covers held-open pipes.
+    child.on('close', settle);
+    child.on('exit', (code, signal) => { timers.push(setTimeout(() => settle(code, signal), 2_000)); });
   });
 }
 
@@ -167,9 +202,11 @@ export async function runPrime(agentId, { runner = defaultRunner, now = () => Da
     const agent = getAgent(agentId);
     const { err, stdout, stderr } = await runner(agent.bin, primeArgs(agentId, { model, cwd: PRIME_DIR }), {
       cwd: PRIME_DIR,
-      // The StopFailure hook ignores runs carrying this, so a prime that hits
-      // a limit is never recorded as a session to revive.
-      env: { ...process.env, UNSNOOZE_PRIME: '1' },
+      // standaloneEnv: `prime now` from inside a Claude Code session must not
+      // hand its session markers (CLAUDECODE, UNSNOOZE_MUX…) to the prime.
+      // The StopFailure hook ignores runs carrying UNSNOOZE_PRIME, so a prime
+      // that hits a limit is never recorded as a session to revive.
+      env: { ...standaloneEnv(), UNSNOOZE_PRIME: '1' },
     });
     const read = agentId === 'claude' ? parseClaudePrime(stdout) : parseCodexPrime(stdout, { codexDir });
     if (!read) {
@@ -202,20 +239,40 @@ const PRIME_TITLES = {
   'no-window': 'window priming does nothing',
 };
 
-function record(result) {
+// A failed prime (network still down after wake, a 5xx) retries within the
+// slot's grace, a few times and not back to back.
+const MAX_ATTEMPTS = 3;
+const RETRY_GAP_MS = 5 * 60_000;
+
+// The day this record has settled, as dueDay's lastDay: a failure with tries
+// left settles nothing once the retry gap has passed.
+function settledDay(rec, now) {
+  if (!rec) return null;
+  const retry = rec.outcome === 'failed' && !rec.manual
+    && (rec.attempts || 1) < MAX_ATTEMPTS && now - rec.at >= RETRY_GAP_MS;
+  return retry ? null : rec.day;
+}
+
+// Scheduled results keep the day they served and the attempt count; a manual
+// `prime now` keeps whatever the schedule had, so testing at 05:00 does not
+// cancel the 06:00 prime.
+function record(result, { day, attempts, manual = false } = {}) {
   updateState(state => {
     state.prime = state.prime && typeof state.prime === 'object' ? state.prime : {};
-    state.prime[result.agent] = { learned: state.prime[result.agent]?.learned, ...result, day: dayKey(result.at) };
+    const prev = state.prime[result.agent] || {};
+    state.prime[result.agent] = manual
+      ? { learned: prev.learned, ...result, day: prev.day ?? null, attempts: prev.attempts, manual: true }
+      : { learned: prev.learned, ...result, day, attempts };
   });
 }
 
-// The slot to prime at today: the fixed time, or for auto the learned one —
+// The slot to prime at: the fixed time, or for auto the learned one —
 // re-learned once a day and kept in state, so ticks in between cost nothing.
 async function resolveSlot(id, { now, days, last, learn }) {
   const at = normalizePrimeAt(getConfig(`primeAt.${id}`));
-  if (at !== 'auto') return at;
+  if (at !== 'auto') return { at, wrap: false };
   const known = last[id]?.learned;
-  if (known?.day === dayKey(now) && known.primeDays === days) return known.slot;
+  if (known?.day === dayKey(now) && known.primeDays === days) return { at: known.slot, wrap: !!known.wrap };
   const learned = { ...(await learn(id, { days, now })), day: dayKey(now), primeDays: days };
   updateState(state => {
     state.prime = state.prime && typeof state.prime === 'object' ? state.prime : {};
@@ -224,7 +281,7 @@ async function resolveSlot(id, { now, days, last, learn }) {
   log(learned.slot
     ? `${id}: usually starts ~${learned.start} (${learned.days} days) — priming at ${learned.slot}`
     : `${id}: auto priming still learning (${learned.days} of ${MIN_DAYS} days)`);
-  return learned.slot;
+  return { at: learned.slot, wrap: !!learned.wrap };
 }
 
 let ticking = false;
@@ -241,26 +298,37 @@ export async function tickPrime({ now = Date.now(), run = runPrime, notifyFn = n
 async function tickOn(on, { now, run, notifyFn, learn }) {
   const days = getConfig('primeDays');
   const last = readState().prime || {};
-  const due = [];
+  const due = new Map();
   for (const id of on) {
-    const slot = await resolveSlot(id, { now, days, last, learn });
-    if (primeDue({ at: slot, days, lastDay: last[id]?.day, now })) due.push(id);
+    const { at, wrap } = await resolveSlot(id, { now, days, last, learn });
+    const day = dueDay({ at, wrap, days, lastDay: settledDay(last[id], now), now });
+    if (day) due.set(id, day);
   }
-  if (!due.length) return [];
-  let claimed = [];
+  if (!due.size) return [];
+  // Claimed under the state lock, so a second daemon cannot fire it too.
+  const claimed = new Map();
   updateState(state => {
     state.prime = state.prime && typeof state.prime === 'object' ? state.prime : {};
-    claimed = due.filter(id => state.prime[id]?.day !== dayKey(now));
-    for (const id of claimed) state.prime[id] = { learned: state.prime[id]?.learned, agent: id, at: now, day: dayKey(now), outcome: 'pending' };
+    for (const [id, day] of due) {
+      const rec = state.prime[id];
+      if (settledDay(rec, now) === day) continue;
+      const attempts = rec?.day === day && rec.outcome === 'failed' ? (rec.attempts || 1) + 1 : 1;
+      claimed.set(id, { day, attempts });
+      state.prime[id] = { learned: rec?.learned, agent: id, at: now, day, attempts, outcome: 'pending' };
+    }
   });
   const notify = notifyFn || (await import('./notify.js')).notify;
   const results = [];
-  for (const id of claimed) {
+  for (const [id, claim] of claimed) {
     const result = await run(id);
-    record(result);
+    record(result, claim);
     const line = formatPrimeResult(result);
     log(line);
-    try { notify(PRIME_TITLES[result.outcome] || 'window prime failed', line, { priority: 2 }); } catch { /* never break the daemon */ }
+    // A failure with retries left is only logged — one toast per prime.
+    const final = result.outcome !== 'failed' || claim.attempts >= MAX_ATTEMPTS;
+    if (final) {
+      try { notify(PRIME_TITLES[result.outcome] || 'window prime failed', line, { priority: 2 }); } catch { /* never break the daemon */ }
+    }
     results.push(result);
   }
   return results;
@@ -279,7 +347,7 @@ export async function cmdPrime(rest = [], { run = runPrime, print = console.log,
     for (const id of ids) {
       print(`unsnooze: priming ${id}…`);
       const result = await run(id);
-      record(result);
+      record(result, { manual: true });
       print(`unsnooze: ${formatPrimeResult(result)}`);
       if (result.outcome === 'failed') code = 1;
     }

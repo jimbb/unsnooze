@@ -15,7 +15,7 @@ for (const k of ['UNSNOOZE_PRIME_AT_CLAUDE', 'UNSNOOZE_PRIME_AT_CODEX', 'UNSNOOZ
 
 const {
   normalizePrimeAt, primeDue, primeArgs, parseClaudePrime, parseCodexPrime,
-  runPrime, tickPrime, cmdPrime, formatPrimeResult, dayKey, GRACE_MS,
+  runPrime, tickPrime, cmdPrime, formatPrimeResult, dayKey, GRACE_MS, dueDay,
 } = await import('../src/prime.js');
 const { setConfigValue, writeConfig, getConfig } = await import('../src/settings.js');
 const { readState, updateState } = await import('../src/state.js');
@@ -85,6 +85,18 @@ test('primeDue: once a day, from the slot until the grace runs out', () => {
   assert.equal(primeDue({ at: '06:00', days: 'daily', now: saturday }), true);
 });
 
+test('dueDay: a slot before midnight serves the next day — weekdays and grace follow it', () => {
+  const fri = new Date(2026, 9, 9, 22, 35).getTime();
+  const sun = new Date(2026, 9, 11, 22, 35).getTime();
+  assert.equal(dueDay({ at: '22:30', wrap: true, days: 'weekdays', now: fri }), null, 'Friday night serves Saturday');
+  assert.equal(dueDay({ at: '22:30', wrap: true, days: 'weekdays', now: sun }), '2026-10-12', 'Sunday night serves Monday');
+  assert.equal(dueDay({ at: '22:30', wrap: false, days: 'weekdays', now: sun }), null);
+  // Asleep 22:20–00:30: yesterday's 22:30 slot is still within grace.
+  const wake = new Date(2026, 9, 13, 0, 30).getTime();
+  assert.equal(dueDay({ at: '22:30', wrap: true, now: wake }), '2026-10-13');
+  assert.equal(dueDay({ at: '22:30', wrap: true, now: wake, lastDay: '2026-10-13' }), null, 'already done');
+});
+
 test('primeArgs: one-shot, cheap, no session left behind for claude; rollout kept for codex', () => {
   const c = primeArgs('claude', { model: 'haiku' });
   assert.deepEqual(c.slice(0, 1), ['-p']);
@@ -95,6 +107,20 @@ test('primeArgs: one-shot, cheap, no session left behind for claude; rollout kep
   assert.equal(x[x.indexOf('-C') + 1], '/p');
   assert.ok(!x.includes('--ephemeral'), 'the rollout is the readback');
   assert.ok(!primeArgs('codex', { model: '' }).includes('-m'), 'no model → codex default');
+});
+
+test('parseClaudePrime looks past an event for another bucket', () => {
+  const weekly = JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'seven_day', resetsAt: 1 } });
+  assert.deepEqual(parseClaudePrime(`${weekly}\n${claudeOut(1791450600)}`), { resetsAtMs: 1791450600_000 });
+});
+
+test('isPrimeDir tolerates how Windows records the path', async () => {
+  const { isPrimeDir } = await import('../src/config.js');
+  assert.equal(isPrimeDir(PRIME_DIR), true);
+  assert.equal(isPrimeDir(`${PRIME_DIR}/`), true);
+  assert.equal(isPrimeDir('\\\\?\\C:\\Users\\Me\\.unsnooze\\prime', 'C:\\users\\me\\.unsnooze\\prime', 'win32'), true);
+  assert.equal(isPrimeDir('/elsewhere'), false);
+  assert.equal(isPrimeDir(null), false);
 });
 
 test('parseClaudePrime reads the five_hour reset from the rate_limit_event', () => {
@@ -162,6 +188,46 @@ test('tickPrime: off by default, fires once per day when due, records the result
   assert.equal(readState().prime.claude.outcome, 'started');
   assert.equal(readState().prime.claude.day, dayKey(SIX));
   assert.match(notes[0], /window started/);
+});
+
+test('tickPrime retries a failed prime, a few times and not back to back', async () => {
+  setConfigValue('primeAt.claude', '06:00');
+  setConfigValue('agents.codex', 'off');
+  const outcomes = ['failed', 'failed', 'failed', 'started'];
+  const runs = [];
+  const run = async id => { runs.push(id); return { agent: id, at: SIX, outcome: outcomes[runs.length - 1], detail: 'offline' }; };
+  const notes = [];
+  const tick = mins => tickPrime({ now: SIX + mins * 60_000, run, notifyFn: (t, b) => notes.push(b) });
+  await tick(1);
+  await tick(3);
+  assert.equal(runs.length, 1, 'not within 5 minutes of the failure');
+  await tick(7);
+  assert.equal(runs.length, 2);
+  assert.equal(readState().prime.claude.attempts, 2);
+  await tick(13);
+  await tick(20);
+  assert.equal(runs.length, 3, 'three attempts, then the day is done');
+  assert.equal(notes.length, 1, 'one toast, for the final failure');
+});
+
+test('prime now does not cancel the scheduled prime', async () => {
+  setConfigValue('primeAt.claude', '06:00');
+  setConfigValue('agents.codex', 'off');
+  const run = async id => ({ agent: id, at: SIX - HOUR, outcome: 'running', resetsAtMs: SIX });
+  await cmdPrime(['now', 'claude'], { run, print: () => {} });
+  const runs = [];
+  await tickPrime({ now: SIX + 60_000, run: async id => { runs.push(id); return { agent: id, at: SIX, outcome: 'started', resetsAtMs: SIX + 5 * HOUR }; }, notifyFn: () => {} });
+  assert.deepEqual(runs, ['claude']);
+});
+
+test('runPrime hands the prime a standalone environment', async () => {
+  process.env.CLAUDECODE = '1';
+  let env;
+  try {
+    await runPrime('claude', { runner: async (b, a, o) => { env = o.env; return { err: null, stdout: '', stderr: '' }; }, now: () => SIX });
+  } finally { delete process.env.CLAUDECODE; }
+  assert.equal(env.CLAUDECODE, undefined, 'nested-session guard stripped');
+  assert.equal(env.UNSNOOZE_PRIME, '1');
 });
 
 test('the StopFailure hook ignores a prime run', async () => {

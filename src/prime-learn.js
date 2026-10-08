@@ -18,7 +18,7 @@
 import { createReadStream, readdirSync, statSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join, dirname } from 'node:path';
-import { CLAUDE_DIR, CODEX_DIR, PRIME_DIR, STATE_DIR, writePrivateFile, ensureStateDir } from './config.js';
+import { CLAUDE_DIR, CODEX_DIR, STATE_DIR, isPrimeDir, writePrivateFile, ensureStateDir } from './config.js';
 import { resolveResumeMessage } from './settings.js';
 
 export const LEARN_DAYS = 21;
@@ -45,12 +45,15 @@ export function promptTimestamp(agentId, line, { resumePrefix = '' } = {}) {
   try { j = JSON.parse(line); } catch { return null; }
   let text;
   if (agentId === 'claude') {
-    if (j.type !== 'user' || j.isSidechain || j.isMeta) return null;
+    if (j.type !== 'user' || j.isSidechain || j.isMeta || j.isCompactSummary) return null;
     text = textOf(j.message?.content);
   } else {
     const p = j.payload;
     if (j.type !== 'response_item' || p?.type !== 'message' || p.role !== 'user') return null;
     text = textOf(p.content);
+    // Codex injects <environment_context>, <user_instructions> and AGENTS.md
+    // as user messages at every session start — revivals included.
+    if (text != null && /^\s*(<[a-z_]+>|# AGENTS\.md)/i.test(text)) return null;
   }
   if (text == null) return null;
   if (resumePrefix && text.trimStart().startsWith(resumePrefix)) return null;
@@ -90,7 +93,7 @@ async function scanFile(agentId, path, resumePrefix) {
     if (first && agentId === 'codex') {
       first = false;
       // A prime's own rollout is not the user starting work.
-      try { if (JSON.parse(line)?.payload?.cwd === PRIME_DIR) { rl.close(); return []; } } catch { /* no meta */ }
+      try { if (isPrimeDir(JSON.parse(line)?.payload?.cwd)) { rl.close(); return []; } } catch { /* no meta */ }
     }
     const ts = promptTimestamp(agentId, line, { resumePrefix });
     if (ts != null) buckets.add(Math.floor(ts / BUCKET_MS) * BUCKET_MS);
@@ -103,13 +106,16 @@ export async function collectPrompts(agentId, {
   now = Date.now(), cacheFile = ACTIVITY_FILE(), files = null, scan = scanFile, ...dirs
 } = {}) {
   const since = now - LEARN_DAYS * DAY_MS;
+  const resumePrefix = resolveResumeMessage(agentId).trim().slice(0, 40);
   let cache = {};
   try { cache = JSON.parse(readFileSync(cacheFile, 'utf-8'))?.[agentId] || {}; } catch { /* first run */ }
-  const resumePrefix = resolveResumeMessage(agentId).trim().slice(0, 40);
+  // Cached timestamps were filtered with the resume message of their day.
+  if (cache.resumePrefix !== resumePrefix) cache = {};
+  const cachedFiles = cache.files || {};
   const next = {};
   const all = [];
   for (const f of files || historyFiles(agentId, { since, ...dirs })) {
-    const hit = cache[f.path];
+    const hit = cachedFiles[f.path];
     const ts = hit && hit.size === f.size && hit.mtimeMs === f.mtimeMs
       ? hit.ts
       : await scan(agentId, f.path, resumePrefix).catch(() => []);
@@ -119,7 +125,7 @@ export async function collectPrompts(agentId, {
   try {
     let whole = {};
     try { whole = JSON.parse(readFileSync(cacheFile, 'utf-8')) || {}; } catch { /* fresh */ }
-    whole[agentId] = next;
+    whole[agentId] = { resumePrefix, files: next };
     ensureStateDir(dirname(cacheFile));
     writePrivateFile(cacheFile, `${cacheFile}.tmp.${process.pid}`, JSON.stringify(whole));
   } catch { /* cache is an optimisation */ }
@@ -128,21 +134,23 @@ export async function collectPrompts(agentId, {
 
 const minuteOfDay = ms => { const d = new Date(ms); return d.getHours() * 60 + d.getMinutes(); };
 
-// The usual start time (minutes after local midnight) — median of each day's
-// first prompt after IDLE_GAP_MS of quiet. null until MIN_DAYS days qualify.
+// The usual start time (minutes after local midnight): for each day, the
+// prompt after the longest quiet of at least IDLE_GAP_MS — the one after
+// sleep, not a stray 00:30 prompt after an evening break — then the median.
+// The earliest prompt on record is never a start: what came before it is
+// unknown. null until MIN_DAYS days qualify.
 export function learnStart(timestamps, { days = 'daily' } = {}) {
-  const firstPerDay = new Map();
-  let prev = -Infinity;
-  for (const t of timestamps) {
-    if (t - prev >= IDLE_GAP_MS) {
-      const d = new Date(t);
-      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-      const weekend = d.getDay() === 0 || d.getDay() === 6;
-      if (!firstPerDay.has(key) && !(days === 'weekdays' && weekend)) firstPerDay.set(key, minuteOfDay(t));
-    }
-    prev = t;
+  const perDay = new Map();
+  for (let i = 1; i < timestamps.length; i++) {
+    const t = timestamps[i];
+    const gap = t - timestamps[i - 1];
+    if (gap < IDLE_GAP_MS) continue;
+    const d = new Date(t);
+    if (days === 'weekdays' && (d.getDay() === 0 || d.getDay() === 6)) continue;
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if (!perDay.has(key) || gap > perDay.get(key).gap) perDay.set(key, { gap, minutes: minuteOfDay(t) });
   }
-  const mins = [...firstPerDay.values()].sort((a, b) => a - b);
+  const mins = [...perDay.values()].map(v => v.minutes).sort((a, b) => a - b);
   if (mins.length < MIN_DAYS) return { minutes: null, days: mins.length };
   const mid = mins.length >> 1;
   const minutes = mins.length % 2 ? mins[mid] : Math.round((mins[mid - 1] + mins[mid]) / 2);
@@ -154,9 +162,11 @@ export const hhmm = minutes => {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 };
 
-// Learn and turn into a prime slot: { start, slot, days } or { slot: null, days }.
+// Learn and turn into a prime slot: { start, slot, wrap, days } or
+// { slot: null, days }. wrap: the slot falls the evening before (start < 03:00).
 export async function learnSlot(agentId, { days = 'daily', ...opts } = {}) {
   const learned = learnStart(await collectPrompts(agentId, opts), { days });
   if (learned.minutes == null) return { slot: null, start: null, days: learned.days };
-  return { start: hhmm(learned.minutes), slot: hhmm(learned.minutes - LEAD_MS / 60_000), days: learned.days };
+  const slotMinutes = learned.minutes - LEAD_MS / 60_000;
+  return { start: hhmm(learned.minutes), slot: hhmm(slotMinutes), wrap: slotMinutes < 0, days: learned.days };
 }

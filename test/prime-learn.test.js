@@ -38,28 +38,54 @@ test('promptTimestamp counts human prompts only', () => {
   assert.equal(promptTimestamp('claude', claudeLine(t, DEFAULTS.resumeMessage), { resumePrefix }), null, 'unsnooze revival');
   assert.equal(promptTimestamp('claude', JSON.stringify({ type: 'assistant', timestamp: new Date(t).toISOString() })), null);
   assert.equal(promptTimestamp('codex', codexLine(t, 'ship it')), t);
+  assert.equal(promptTimestamp('codex', codexLine(t, '<environment_context>\n  <cwd>/x</cwd>')), null, 'injected context');
+  assert.equal(promptTimestamp('codex', codexLine(t, '# AGENTS.md instructions for /x')), null, 'injected AGENTS.md');
+  assert.equal(promptTimestamp('claude', claudeLine(t, 'This session is being continued…', { isCompactSummary: true })), null, 'compaction');
   assert.equal(promptTimestamp('codex', JSON.stringify({ type: 'response_item', timestamp: new Date(t).toISOString(), payload: { type: 'message', role: 'assistant', content: [] } })), null);
 });
 
-test('learnStart: median first start per day, after 5h of quiet', () => {
-  const ts = [];
+test('learnStart: median of each day\'s start after sleep', () => {
+  const ts = [at(20, 18)];   // history before the first day, so day 21 has a known gap
   for (const [day, h, m] of [[21, 12, 53], [22, 12, 31], [23, 12, 7], [24, 12, 35], [28, 16, 7], [29, 12, 13]]) {
-    ts.push(at(day, h, m), at(day, h + 2, m), at(day, 23, 30));
+    ts.push(at(day, h, m), at(day, h + 2, m));
   }
   // Working past midnight: 00:10 follows 23:30 by 40 minutes — not a start.
-  ts.push(at(25, 0, 10));
+  ts.push(at(24, 23, 30), at(25, 0, 10));
   ts.sort((a, b) => a - b);
   const r = learnStart(ts);
   assert.equal(r.days, 6, 'the after-midnight continuation does not count as a day');
   assert.equal(hhmm(r.minutes), '12:33', 'median of 12:07 12:13 12:31 12:35 12:53 16:07');
 });
 
+test('learnStart: a stray prompt after an evening break does not take the day', () => {
+  const ts = [at(20, 9)];
+  for (const day of [21, 22, 23, 24, 25]) ts.push(at(day, 9), at(day, 18));
+  // 00:30 after an 18:00 stop is a 6.5h gap; 09:00 after it is 8.5h — the real start.
+  ts.push(at(23, 0, 30));
+  ts.sort((a, b) => a - b);
+  assert.equal(hhmm(learnStart(ts).minutes), '09:00');
+});
+
+test('learnStart: the earliest prompt on record is not a start', () => {
+  assert.equal(learnStart([at(21, 4)]).days, 0);
+});
+
 test('learnStart: nothing until enough days, weekdays-only when asked', () => {
-  const few = [at(21, 12), at(22, 12), at(23, 12)];
+  const few = [at(20, 12), at(21, 12), at(22, 12), at(23, 12)];
   assert.deepEqual(learnStart(few), { minutes: null, days: 3 });
-  const ts = [19, 20, 21, 22, 23, 24, 25].map(d => at(d, d === 19 || d === 20 ? 15 : 10));   // 19/20 = Sat/Sun
+  const ts = [18, 19, 20, 21, 22, 23, 24, 25].map(d => at(d, d === 19 || d === 20 ? 15 : 10));   // 19/20 = Sat/Sun
   assert.equal(hhmm(learnStart(ts).minutes), '10:00');
   assert.equal(learnStart(ts, { days: 'weekdays' }).days, 5);
+});
+
+test('learnSlot marks a slot that falls the evening before', async () => {
+  const dir = join(DIR, 'claude', 'projects', '-night');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'n.jsonl'), [at(20, 15), ...[21, 22, 23, 24, 25].map(d => at(d, 1, 30))]
+    .map(t => claudeLine(t, 'go')).join('\n') + '\n');
+  const night = await learnSlot('claude', { now: NOW, files: [{ path: join(dir, 'n.jsonl'), size: 1, mtimeMs: 1 }] });
+  assert.deepEqual(night, { start: '01:30', slot: '22:30', wrap: true, days: 5 });
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('hhmm wraps across midnight', () => {
@@ -70,7 +96,7 @@ test('hhmm wraps across midnight', () => {
 function writeClaudeHistory() {
   const dir = join(DIR, 'claude', 'projects', '-repo');
   mkdirSync(dir, { recursive: true });
-  for (const day of [22, 23, 24, 25, 26, 27]) {
+  for (const day of [21, 22, 23, 24, 25, 26, 27]) {
     writeFileSync(join(dir, `s${day}.jsonl`), [
       claudeLine(at(day, 12, 10), 'start'),
       claudeLine(at(day, 12, 11), [{ type: 'tool_result', content: '' }]),
@@ -89,19 +115,23 @@ test('collectPrompts reads history once, then only changed files', async () => {
     return readFileSync(path, 'utf-8').split('\n').map(l => promptTimestamp(agentId, l, { resumePrefix })).filter(t => t != null);
   };
   const first = await collectPrompts('claude', { now: NOW, scan: counting });
-  assert.equal(scans, 6);
-  assert.equal(first.length, 6, 'one human prompt per day; tool results and revivals dropped');
+  assert.equal(scans, 7);
+  assert.equal(first.length, 7, 'one human prompt per day; tool results and revivals dropped');
   await collectPrompts('claude', { now: NOW, scan: counting });
-  assert.equal(scans, 6, 'unchanged files come from the cache');
+  assert.equal(scans, 7, 'unchanged files come from the cache');
   appendFileSync(join(dir, 's27.jsonl'), claudeLine(at(27, 18), 'evening') + '\n');
   const third = await collectPrompts('claude', { now: NOW, scan: counting });
-  assert.equal(scans, 7, 'only the appended file is re-read');
-  assert.equal(third.length, 7);
+  assert.equal(scans, 8, 'only the appended file is re-read');
+  assert.equal(third.length, 8);
+  // A new resume message changes what counts as a revival: rescan everything.
+  setConfigValue('resumeMessage', 'Keep going.');
+  await collectPrompts('claude', { now: NOW, scan: counting });
+  assert.equal(scans, 15);
 });
 
 test('learnSlot: primes three hours before the usual start; codex skips prime rollouts', async () => {
   writeClaudeHistory();
-  assert.deepEqual(await learnSlot('claude', { now: NOW }), { start: '12:10', slot: '09:10', days: 6 });
+  assert.deepEqual(await learnSlot('claude', { now: NOW }), { start: '12:10', slot: '09:10', wrap: false, days: 6 });
   const dir = join(DIR, 'codex', 'sessions', '2026', '09', '29');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'rollout-2026-09-29T06-00-00-p.jsonl'),

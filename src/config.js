@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, win32 } from 'node:path';
 import {
   mkdirSync, chmodSync, writeFileSync, renameSync, lstatSync, statSync, readdirSync,
 } from 'node:fs';
@@ -16,6 +16,18 @@ export const LOG_FILE = join(STATE_DIR, 'unsnooze.log');
 export const EVENTS_DIR = join(STATE_DIR, 'events');
 // Working dir for window primes (prime.js) — the watcher ignores stops in it.
 export const PRIME_DIR = join(STATE_DIR, 'prime');
+
+// Is this (agent-recorded) cwd the prime dir? Codex may record it with a
+// \\?\ prefix or another drive-letter case on Windows.
+export function isPrimeDir(dir, primeDir = PRIME_DIR, platform = process.platform) {
+  if (!dir) return false;
+  const norm = p => {
+    const raw = String(p).replace(/^\\\\\?\\/, '');
+    return platform === 'win32' ? win32.resolve(raw).toLowerCase() : resolve(raw);
+  };
+  return norm(dir) === norm(primeDir);
+}
+
 export const RESUMER_LOCK = join(STATE_DIR, 'resumer.lock');
 // High-frequency burn accumulator + warn-dedup (daemon single-writer).
 export const USAGE_FILE = join(STATE_DIR, 'usage.json');
