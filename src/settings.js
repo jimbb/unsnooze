@@ -57,6 +57,11 @@ export const DEFAULTS = {
   // compacted) is useless if it only applies to revives, because the session
   // that runs out of context is the one the user started.
   launchExtraArgs: { claude: '', codex: '', grok: '', qwen: '', kimi: '', opencode: '', agy: '', cursor: '' },
+  // Window priming (experimental, see prime.js): one tiny prompt at primeAt
+  // (local HH:MM) starts the 5-hour window early. '' = off.
+  primeAt: { claude: '', codex: '' },
+  primeModel: { claude: '', codex: '' },   // '' = claude haiku / codex's cheapest cached model
+  primeDays: 'daily',                      // daily | weekdays
   agents: { claude: true, codex: true, grok: false, qwen: false, kimi: false, opencode: false, agy: false, cursor: false },   // experimental agents default off
 };
 
@@ -107,6 +112,11 @@ const ENV_NAMES = {
   'launchExtraArgs.opencode': 'UNSNOOZE_LAUNCH_EXTRA_ARGS_OPENCODE',
   'launchExtraArgs.agy': 'UNSNOOZE_LAUNCH_EXTRA_ARGS_AGY',
   'launchExtraArgs.cursor': 'UNSNOOZE_LAUNCH_EXTRA_ARGS_CURSOR',
+  'primeAt.claude': 'UNSNOOZE_PRIME_AT_CLAUDE',
+  'primeAt.codex': 'UNSNOOZE_PRIME_AT_CODEX',
+  'primeModel.claude': 'UNSNOOZE_PRIME_MODEL_CLAUDE',
+  'primeModel.codex': 'UNSNOOZE_PRIME_MODEL_CODEX',
+  primeDays: 'UNSNOOZE_PRIME_DAYS',
   'agents.claude': 'UNSNOOZE_AGENT_CLAUDE',
   'agents.codex': 'UNSNOOZE_AGENT_CODEX',
   'agents.grok': 'UNSNOOZE_AGENT_GROK',
@@ -127,6 +137,7 @@ const ENUMS = {
   notifyChannel: ['auto', 'native', 'osc', 'bell'],
   ntfyPrivacy: ['full', 'terse'],
   usageWarn: ['off', 'notify'],
+  primeDays: ['daily', 'weekdays'],
 };
 
 function parseBool(raw) {
@@ -253,6 +264,13 @@ export function setConfigValue(key, rawValue) {
     value = n;
   } else {
     value = String(rawValue);
+    if (key.startsWith('primeAt.')) {
+      // Inline, not imported from prime.js: that module pulls in usage.js,
+      // and settings.js must stay a cheap leaf for the hook path.
+      const m = value.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+      if (!m && !/^(off)?$/i.test(value.trim())) throw new Error(`unsnooze: "${key}" needs a local time like 06:00, or off`);
+      value = m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+    }
     if (ENUMS[key] && !ENUMS[key].includes(value)) {
       throw new Error(`unsnooze: "${key}" must be one of: ${ENUMS[key].join(', ')}`);
     }

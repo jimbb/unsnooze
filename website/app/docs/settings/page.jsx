@@ -64,6 +64,9 @@ export default function SettingsDocsPage() {
                     <tr><td><C>contextGuardTokens</C></td><td><C>100000</C></td><td>Context-size threshold (tokens) for <C>contextGuard</C>.</td></tr>
                     <tr><td><C>usageWarn</C></td><td><C>notify</C></td><td>Pre-wall usage warnings from the daemon: <C>notify</C> or <C>off</C>.</td></tr>
                     <tr><td><C>usageWarnAt</C></td><td><C>80,95</C></td><td>Percent thresholds for usage warnings. Non-numeric values fall back to the default — never silently disable.</td></tr>
+                    <tr><td><C>primeAt.claude</C> / <C>primeAt.codex</C></td><td><C>""</C></td><td>Experimental: local time (<C>06:00</C>) to send one tiny prompt that starts the 5-hour window early. Needs the daemon. See <a href="/docs/commands/#prime">Window priming</a>.</td></tr>
+                    <tr><td><C>primeModel.&lt;agent&gt;</C></td><td><C>""</C></td><td>Model for the prime. Empty = Claude <C>haiku</C>, Codex's cheapest cached model.</td></tr>
+                    <tr><td><C>primeDays</C></td><td><C>daily</C></td><td><C>daily</C> or <C>weekdays</C>.</td></tr>
                     <tr><td><C>mouse</C></td><td><C>true</C></td><td>Mouse support in the dashboard; toggle live with <C>m</C>. Hold Shift (Option in iTerm2) to select text.</td></tr>
                     <tr><td><C>reapResumed</C></td><td><C>false</C></td><td>Opt-in: auto-close <C>resumed</C> panes idle longer than <C>reapIdleAfter</C>.</td></tr>
                     <tr><td><C>reapIdleAfter</C></td><td><C>604800000</C> (7d)</td><td>Idle age (ms) before an opt-in auto-reap closes a resumed pane.</td></tr>

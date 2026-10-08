@@ -62,6 +62,8 @@ export async function runHook(rest = [], { ensureDaemonFn = ensureDaemon } = {})
     const agentIdx = rest.indexOf('--agent');
     const agent = getAgent(agentIdx !== -1 ? rest[agentIdx + 1] : 'claude');
     if (!getConfig(`agents.${agent.id}`)) return 0;   // agent disabled in settings
+    // A window prime (prime.js) is a throwaway one-shot — never a session to revive.
+    if (process.env.UNSNOOZE_PRIME) return 0;
     // Nothing keeps the daemon running on native Windows (see ensureDaemon),
     // and the hook is the one entry point GUI Claude sessions pass through —
     // so it makes sure the daemon is up. A no-op everywhere else.

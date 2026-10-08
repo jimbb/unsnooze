@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Window priming (experimental)
+
+- Claude's 5-hour window starts with your first message, so starting work at
+  9am means a reset at 2pm. `unsnooze config set primeAt.claude 06:00` has the
+  daemon send one tiny Haiku prompt at 6am, so the window resets at 11am and a
+  fresh one lands mid-morning. Codex works the same on plans with a 5-hour
+  window (`primeAt.codex`).
+- Every prime checks the reset time in the reply and reports whether it
+  started the window, found one already running, or found no 5-hour window on
+  the plan. `unsnooze prime` shows the schedule and last result;
+  `unsnooze prime now` runs one immediately. `primeDays weekdays` skips
+  weekends.
+- A prime that hits a limit is never treated as a session to revive.
+
 ## 1.19.5 — 2026-10-05
 
 Sessions resume again under psmux, Antigravity no longer wakes early, and

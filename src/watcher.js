@@ -18,7 +18,7 @@ import { join, sep, basename, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import {
   CLAUDE_DIR, CODEX_DIR, WATCH_OFFSETS_FILE, WATCH_FRESHNESS_MS,
-  RESET_MARGIN_MS, PROBE_INTERVAL_MS,
+  RESET_MARGIN_MS, PROBE_INTERVAL_MS, PRIME_DIR,
 } from './config.js';
 import { getMultiplexer } from './multiplexer.js';
 import { parseTranscriptLine } from './watchers/claude.js';
@@ -170,6 +170,9 @@ export function defaultSources() {
 // MAX_RESUME_ATTEMPTS cap could never bind — and a cancelled record stays
 // cancelled.
 export function dispatchCandidate(c) {
+  // A window prime's own rollout (prime.js runs codex in PRIME_DIR) hitting a
+  // limit is not a session — reviving it would spend quota on nothing.
+  if (c.cwd && c.cwd === PRIME_DIR) return;
   const detectedAt = c.timestampMs || Date.now();
   const bannerAt = c.timestampMs || null;
   let at, source;

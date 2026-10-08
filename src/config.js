@@ -14,6 +14,8 @@ export const STATE_FILE = join(STATE_DIR, 'state.json');
 export const LOCK_DIR = join(STATE_DIR, 'state.lock');
 export const LOG_FILE = join(STATE_DIR, 'unsnooze.log');
 export const EVENTS_DIR = join(STATE_DIR, 'events');
+// Working dir for window primes (prime.js) — the watcher ignores stops in it.
+export const PRIME_DIR = join(STATE_DIR, 'prime');
 export const RESUMER_LOCK = join(STATE_DIR, 'resumer.lock');
 // High-frequency burn accumulator + warn-dedup (daemon single-writer).
 export const USAGE_FILE = join(STATE_DIR, 'usage.json');

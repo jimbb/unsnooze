@@ -81,6 +81,8 @@ Usage:
   unsnooze usage [--json]          account burn rate & time-to-limit forecast
                                    (--install-statusline for exact Claude %,
                                     --uninstall-statusline to remove it)
+  unsnooze prime [now [agent]]     window priming (experimental): start the 5-hour
+                                   window early — set a time with primeAt.claude
   unsnooze design [setup]          Claude Design from the terminal: check whether
                                    the claude-design MCP server is registered and
                                    signed in, or register it with setup
@@ -162,6 +164,29 @@ $ unsnooze usage --uninstall-statusline  # restore your original statusLine`}</S
               <p><strong>Honest limits:</strong> Claude transcript sums are a lower bound —
                 subscription quotas are account-pooled with claude.ai and the desktop app. Without
                 the shim, Claude tops out at calibrated/estimated.</p>
+            </section>
+
+            <section className="doc-sec" id="prime">
+              <h2>Window priming <small>(experimental)</small></h2>
+              <p>Claude's 5-hour window starts with the first message after a reset, not on a
+                clock. Start work at 9am and it resets at 2pm. Have unsnooze send one tiny prompt
+                to the cheapest model at 6am and the window resets at 11am instead — a fresh one
+                lands mid-morning.</p>
+              <Shell title="window priming">{`$ unsnooze config set primeAt.claude 06:00   # local time; off to stop
+$ unsnooze config set primeDays weekdays      # optional (default: daily)
+$ unsnooze prime                              # schedule + last result
+$ unsnooze prime now claude                   # prime right away
+unsnooze: claude 5-hour window started — resets 11:00 am`}</Shell>
+              <p>Scheduled primes run from the daemon (<C>unsnooze install --daemon</C>). A machine
+                asleep at the scheduled time primes on wake, up to 4 hours late; after that the
+                day is skipped. Each prime checks itself — the reply carries the window's reset
+                time — and reports <em>started</em>, <em>already running</em>, <em>no 5-hour
+                window on this plan</em>, or the failure.</p>
+              <p><strong>Which agents:</strong> Claude (Haiku, about a third of a cent) and Codex
+                (the cheapest cached model, e.g. <C>gpt-6-luna</C>). Codex Pro currently has no
+                5-hour window, so priming does nothing there and says so. Other agents are left
+                out on purpose: Cursor and Grok reset on a fixed billing clock, Qwen's quota
+                slides per request and its terms forbid scheduled non-interactive use.</p>
             </section>
 
             <section className="doc-sec" id="prompts">

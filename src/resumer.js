@@ -1153,6 +1153,13 @@ export async function runResumer({
         log(`usage warn tick failed: ${err.message}`);
       }
 
+      // Window priming (experimental) — not awaited: a prime is a model call
+      // of up to minutes, and resumes must not queue behind it. tickPrime
+      // claims the day before running, so later ticks cannot double-fire.
+      import('./prime.js')
+        .then(({ tickPrime }) => tickPrime())
+        .catch(err => log(`prime tick failed: ${err.message}`));
+
       // Scheduled cleanup: age prune + pane-aware sweep + abandon stale stops.
       try {
         updateState(state => { prune(state); return state; });
