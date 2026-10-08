@@ -203,15 +203,16 @@ unsnooze: claude 5-hour window started — resets 2:10 pm`}</Shell>
               <p>Queue a prompt now; unsnooze types it into a <strong>brand-new</strong> agent
                 session — a fresh window in a project directory — once a usage limit clears (or
                 at a time you choose). It's one-shot: each entry is delivered at most once.</p>
-              <Shell title="prompt queue">{`$ unsnooze prompt add "run the full test suite and fix any failures"
+              <Shell title="prompt queue" examples={['~/code/api']}>{`$ unsnooze prompt add "run the full test suite and fix any failures"
 # → interactive agent picker on a TTY; queued for next-reset in the cwd
 
 $ unsnooze prompt add --agent codex --project ~/code/api --now "ship the release"
 $ unsnooze prompt add --at "+2h30m" "rebase onto main"   # relative duration
 $ unsnooze prompt add --at "9pm" "nightly cleanup pass"  # next occurrence of a clock time
-$ unsnooze prompt add --at 1755000000 "..."              # epoch (seconds or ms), or an ISO-8601 timestamp
+$ unsnooze prompt add --at <epoch|ISO-8601> "<prompt>"  # epoch (seconds or ms), or an ISO-8601 timestamp
 
-$ unsnooze prompt list [--json]   # id, agent, due, status, cwd, prompt preview
+$ unsnooze prompt list            # id, agent, due, status, cwd, prompt preview
+$ unsnooze prompt list --json     # the same, for scripts
 $ unsnooze prompt remove <id>     # cancel one pending/launching entry
 $ unsnooze prompt clear           # cancel every pending/launching entry`}</Shell>
               <h3>Modes</h3>
@@ -251,7 +252,7 @@ $ unsnooze prompt clear           # cancel every pending/launching entry`}</Shel
                 — the queue verbs then answer a typed "disabled" instead of silently dropping; a
                 remote that predates this feature reports a clear "too old" error instead of
                 failing silently.</p>
-              <Shell title="fleet prompt queue">{`$ unsnooze prompt add --host gpu-box --project /home/me/repo --agent claude --now "..."
+              <Shell title="fleet prompt queue" examples={['gpu-box']}>{`$ unsnooze prompt add --host gpu-box --project /home/me/repo --agent claude --now "run the test suite"
 $ unsnooze prompt list --host gpu-box`}</Shell>
               <h3>Dashboard</h3>
               <p>The <strong>Prompts</strong> tab (<C>7</C>) lists queued entries; <C>a</C> opens

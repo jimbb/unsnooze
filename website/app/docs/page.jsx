@@ -168,7 +168,7 @@ unsnooze doctor: all clear — install is healthy.
               <p>On an interactive terminal, <C>status</C>, <C>usage</C>, and <C>sessions</C> open
                 the live dashboard instead; pipes, <C>CI</C>, <C>NO_COLOR</C>, and <C>--json</C>{' '}
                 stay plain. The common interventions:</p>
-              <Shell title="interventions">{`$ unsnooze message f3a1 "Run the tests first, then continue."
+              <Shell title="interventions" examples={['f3a1']}>{`$ unsnooze message f3a1 "Run the tests first, then continue."
 $ unsnooze resume-now f3a1     # don't wait for the reset time
 $ unsnooze cancel --all        # stop tracking everything`}</Shell>
               <p>Not sure what it's about to do? <C>unsnooze preview</C> is a true dry-run: it

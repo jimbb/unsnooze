@@ -44,11 +44,12 @@ export default function FleetDocsPage() {
                 terminal — over your own SSH, no new service to run. The remote host needs
                 unsnooze installed; transport is your existing <C>~/.ssh/config</C>, keys, and
                 agent.</p>
-              <Shell title="fleet">{`$ unsnooze hosts add work you@work-box.local   # register an ssh destination
+              <Shell title="fleet" examples={['work']}>{`$ unsnooze hosts add work you@work-box.local   # register an ssh destination
 $ unsnooze hosts list                          # registered hosts
 $ unsnooze hosts test work                     # pre-flight: credential + reachability
 $ unsnooze hosts rm work                       # forget a host
-$ unsnooze fleet [--json]                      # every host's sessions, fanned out over ssh
+$ unsnooze fleet                               # every host's sessions, fanned out over ssh
+$ unsnooze fleet --json                        # the same, for scripts
 $ unsnooze dashboard fleet                     # live Fleet tab`}</Shell>
               <p><strong>Before adding a host, connect to it the normal way once</strong>{' '}
                 (<C>ssh &lt;host&gt;</C>) so OpenSSH pins the host key itself. unsnooze never
@@ -117,7 +118,7 @@ $ unsnooze dashboard fleet                     # live Fleet tab`}</Shell>
                   stderr is deliberately discarded so a chatty secret tool can never leak into
                   logs.</li>
               </ul>
-              <Shell title="examples">{`$ unsnooze hosts add laptop me@laptop.local --auth password
+              <Shell title="examples" examples={['laptop', 'gpu', 'mac', 'ci']}>{`$ unsnooze hosts add laptop me@laptop.local --auth password
 # → prompts (no-echo) every time it's used from a real terminal
 
 $ unsnooze hosts add gpu ubuntu@gpu.example.com --auth password --source env --env UNSNOOZE_PW_GPU

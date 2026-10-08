@@ -368,10 +368,10 @@ Usage:
   unsnooze prompt remove <id>      cancel a queued prompt
   unsnooze prompt clear            cancel all pending queued prompts
   unsnooze usage [--json]          account burn rate & time-to-limit forecast
-  unsnooze prime [now [agent]]     window priming (experimental): start the 5-hour
-                                   window early — set a time with primeAt.claude
                                    (--install-statusline for exact Claude %,
                                     --uninstall-statusline to remove it)
+  unsnooze prime [now [agent]]     window priming (experimental): start the 5-hour
+                                   window early — set a time with primeAt.claude
   unsnooze design [setup]          Claude Design from the terminal: check whether
                                    the claude-design MCP server is registered and
                                    signed in, or register it with setup

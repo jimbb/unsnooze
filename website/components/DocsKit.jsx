@@ -2,21 +2,12 @@
 // /docs/ page was split so the five pages stay visually identical.
 
 import CopyButton from './CopyButton.jsx';
-
-// What a shell's copy key copies: the `$ ` lines as commands — prompt and
-// trailing `# comment` dropped — never the output around them. A block with
-// no `$ ` line is output only and gets no key.
-export function shellCommands(text) {
-  if (typeof text !== 'string') return '';
-  return text.split('\n')
-    .filter(line => line.startsWith('$ '))
-    .map(line => line.slice(2).replace(/\s+#\s.*$/, '').trimEnd())
-    .join('\n');
-}
+import { shellCommands } from '../lib/shell-commands.js';
 
 // A terminal block: a mono caption bar and the output — no fake window chrome.
-export function Shell({ title = 'terminal', children }) {
-  const commands = shellCommands(children);
+// `examples`: this block's sample values — lines using them are not copied.
+export function Shell({ title = 'terminal', examples, children }) {
+  const commands = shellCommands(children, { examples });
   return (
     <figure className="shell">
       <figcaption>
