@@ -117,6 +117,12 @@ test('transient stream errors are NOT usage limits but ARE overloads', () => {
   assert.ok(overloadMatch(pane, codex.patterns.overloadPatterns));
 });
 
+test('model-at-capacity errors are NOT usage limits but ARE overloads', () => {
+  const pane = '■ Selected model is at capacity. Please try a different model.\n\n› Ask Codex to do anything\n';
+  assert.equal(detectLimit(pane, 12, codex.patterns).hit, false);
+  assert.ok(overloadMatch(pane, codex.patterns.overloadPatterns));
+});
+
 test('busy and idle markers', () => {
   assert.equal(isBusy('• Working (12s • esc to interrupt)\n', codex.patterns.busyPatterns), true);
   const idle = '› Ask Codex to do anything\n\ngpt-5.6 default · /tmp/project\n';
