@@ -7,8 +7,9 @@
 // Reset-time tails vary by plan: "try again at 3:51 PM." (same day),
 // "try again at Feb 23rd, 2026 9:01 PM." (cross-day), "Try again in 4 days
 // 20 hours 9 minutes." (older builds), or "Try again later." (no timestamp).
-// Transient errors render "stream error: … retrying 4/5 in 1.4s" and must take
-// the overload path, never the ledger.
+// Transient errors render "stream error: … retrying 4/5 in 1.4s" or "Selected
+// model is at capacity. Please try a different model." (ServerOverloaded, which
+// Codex does not retry itself) and must take the overload path, never the ledger.
 
 import { openSync, readSync, closeSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
@@ -104,8 +105,8 @@ export const patterns = {
     /retrying\s+\d+\/\d+/i,        // internal stream-error retry — don't inject
   ],
   idleRegex: /›/,                  // composer: "› Ask Codex to do anything"
-  overloadPatterns: [/stream error/i, /exceeded retry limit/i],
-  transientPatterns: [/stream error/i, /exceeded retry limit/i],
+  overloadPatterns: [/stream error/i, /exceeded retry limit/i, /model is at capacity/i],
+  transientPatterns: [/stream error/i, /exceeded retry limit/i, /model is at capacity/i],
 };
 
 // A submitted user turn uses the same › glyph as the composer. Only accept
