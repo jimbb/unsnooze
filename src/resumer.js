@@ -716,7 +716,11 @@ export async function dispatchOne(rec, {
       // after assessment and immediately before the keystroke.
       if (finishIfClaudeProgressed(rec, agent)) return 'already-resumed';
       if (!claimStopForResume(rec, agent.id === 'codex' ? resumeMessage : null)) return 'stale';
-      await mux.sendText(rec.pane, resumeMessage);
+      if (agent.id === 'codex' && typeof mux.submitPrompt === 'function') {
+        await mux.submitPrompt(rec.pane, resumeMessage);
+      } else {
+        await mux.sendText(rec.pane, resumeMessage);
+      }
       log(`${key}: sent continue via ${rec.mux} ${rec.paneOwner ?? '-'}:${rec.pane}`);
       notifyContext();
       return 'injected';
@@ -864,7 +868,11 @@ export async function awaitReadyAndSend(mux, pane, agent, message, {
     }
     // The idle input box: a prompt glyph with no busy footer.
     if (!isBusy(text, agent.patterns.busyPatterns) && agent.patterns.idleRegex.test(text)) {
-      await mux.sendText(pane, message);
+      if (agent.id === 'codex' && typeof mux.submitPrompt === 'function') {
+        await mux.submitPrompt(pane, message);
+      } else {
+        await mux.sendText(pane, message);
+      }
       return 'sent';
     }
   }

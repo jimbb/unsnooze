@@ -199,6 +199,15 @@ test('sendText sends literal text and submits after the required delay', async (
   ]);
 });
 
+test('submitPrompt sends the text and Enter as one agent prompt', async () => {
+  const spawner = fakeSpawner(() => '');
+  const mux = createHerdr({ spawner, env: {} }).bind('OWNER');
+  await mux.submitPrompt('w1:p1', 'continue');
+  assert.deepEqual(spawner.calls.map(call => call.args), [
+    ['--session', 'OWNER', 'agent', 'prompt', 'w1:p1', 'continue'],
+  ]);
+});
+
 test('sendKey maps named keys and falls back to literal text', async () => {
   const spawner = fakeSpawner(() => '');
   const mux = createHerdr({ spawner, env: {} }).bind('OWNER');

@@ -255,7 +255,12 @@ export function createMonitor({
     if (text === null) return;
     if (isBusy(text, agent.patterns.busyPatterns)) { log(`pane ${pane}: busy after overload wait — skip inject`); return; }
     if (!overloadMatch(text, agent.patterns.overloadPatterns)) { overloadAttempt = 0; return; }   // recovered on its own
-    await mux.sendText(pane, 'Continue where you left off. The previous attempt failed with a transient API error.');
+    const retryText = 'Continue where you left off. The previous attempt failed with a transient API error.';
+    if (agent.id === 'codex' && typeof mux.submitPrompt === 'function') {
+      await mux.submitPrompt(pane, retryText);
+    } else {
+      await mux.sendText(pane, retryText);
+    }
     log(`pane ${pane}: overload retry message sent`);
   }
 

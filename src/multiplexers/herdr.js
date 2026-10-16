@@ -445,6 +445,14 @@ export function createHerdr({ spawner = defaultSpawner, env = process.env } = {}
         await owned('pane', 'send-keys', String(pane), 'enter');
       },
 
+      // Codex bracketed-paste mode swallows a later Enter as another newline,
+      // so the wake text sits in the composer until a person presses Enter.
+      // `agent prompt` writes the text and an encoded Enter as one submission,
+      // and it addresses the pane id directly.
+      async submitPrompt(pane, text) {
+        await owned('agent', 'prompt', String(pane), text);
+      },
+
       async sendKey(pane, key) {
         const named = KEY_MAP[key];
         if (named) {

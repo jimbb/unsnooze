@@ -55,6 +55,28 @@ async function sentDraft() {
     counts: () => ({ texts, enters }), current: () => readState().sessions[rec.key] };
 }
 
+test('a herdr Codex wake submits through agent prompt instead of text plus Enter', async () => {
+  const pane = `%${nextPane++}`;
+  const state = upsertSession({
+    sessionId: `00000000-0000-4000-8000-${String(nextPane).padStart(12, '0')}`,
+    agent: 'codex', cwd: dir, pane, paneOwner: null, mux: 'herdr', leaseId: null,
+    status: 'stopped', limitType: '5h', detectedVia: 'watcher',
+    detectedAt: Date.now() - 3600000, resetAt: Date.now() - 1000,
+    resetSource: 'absolute', attempts: 0,
+  });
+  const rec = Object.values(state.sessions).find(s => s.pane === pane);
+  let prompts = 0, texts = 0;
+  const mux = {
+    paneAlive: async () => true, paneCurrentCommand: async () => 'codex',
+    capturePane: async () => '› \n', capturePaneVisible: async () => '› \n',
+    submitPrompt: async () => { prompts++; },
+    sendText: async () => { texts++; },
+  };
+  assert.equal(await dispatchOne(rec, { mux, resumeMessage: message }), 'injected');
+  assert.equal(prompts, 1);
+  assert.equal(texts, 0);
+});
+
 test('monitor preserves the episode; verification submits the draft once without retyping', async () => {
   const f = await sentDraft();
   const monitor = createMonitor({
