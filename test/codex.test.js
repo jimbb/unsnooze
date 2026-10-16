@@ -117,10 +117,13 @@ test('transient stream errors are NOT usage limits but ARE overloads', () => {
   assert.ok(overloadMatch(pane, codex.patterns.overloadPatterns));
 });
 
-test('model-at-capacity errors are NOT usage limits but ARE overloads', () => {
+test('model-at-capacity errors are limit stops, not overloads', () => {
   const pane = '■ Selected model is at capacity. Please try a different model.\n\n› Ask Codex to do anything\n';
-  assert.equal(detectLimit(pane, 12, codex.patterns).hit, false);
-  assert.ok(overloadMatch(pane, codex.patterns.overloadPatterns));
+  const d = detectLimit(pane, 12, codex.patterns);
+  assert.equal(d.hit, true);
+  assert.match(d.resetLine, /model is at capacity/i);
+  assert.equal(parseResetTime(d.resetLine), null, 'no clock time — the probe schedule stands in');
+  assert.equal(overloadMatch(pane, codex.patterns.overloadPatterns), null);
 });
 
 test('busy and idle markers', () => {

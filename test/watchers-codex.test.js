@@ -308,6 +308,16 @@ test('the usage_limit_exceeded marker without a banner is not a stop', () => {
   }
 });
 
+test('model-at-capacity task_complete is a stop with no clock time', () => {
+  const c = parseRolloutLine(taskCompleteLine({
+    message: 'Selected model is at capacity. Please try a different model.',
+    codex_error_info: 'server_overloaded',
+  }));
+  assert.ok(c);
+  assert.equal(c.resetAt, null);
+  assert.match(c.resetLine, /model is at capacity/i);
+});
+
 test('other task_complete outcomes are not stops', () => {
   const bare429 = { message: 'exceeded retry limit, last status: 429 Too Many Requests',
     codex_error_info: { response_too_many_failed_attempts: { http_status_code: 429 } } };
